@@ -1,7 +1,7 @@
 # Railway executa o buildCommand antes do next build
 [build]
 builder = "nixpacks"
-buildCommand = "npm ci && node scripts/download-models.mjs && npm run build && node scripts/seed-admin.mjs"
+buildCommand = "npm install && node scripts/download-models.mjs && npm run build && node scripts/seed-admin.mjs"
 
 [deploy]
 startCommand = "npm start"
