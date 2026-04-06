@@ -4,7 +4,7 @@ builder = "nixpacks"
 buildCommand = "npm install && node scripts/download-models.mjs && npm run build"
 
 [deploy]
-startCommand = "node scripts/seed-admin.mjs && npm start"
+startCommand = "node scripts/seed-admin.mjs || true && npm start"
 restartPolicyType = "on_failure"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30

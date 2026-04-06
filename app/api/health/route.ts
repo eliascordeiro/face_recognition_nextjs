@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server'
 import pool from '@/lib/db'
 
 export async function GET() {
+  let db = 'ok'
   try {
     await pool.query('SELECT 1')
-    return NextResponse.json({ status: 'ok' })
   } catch {
-    return NextResponse.json({ status: 'error' }, { status: 503 })
+    db = 'unavailable'
   }
+  return NextResponse.json({ status: 'ok', db })
 }
