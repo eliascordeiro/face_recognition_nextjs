@@ -53,6 +53,7 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [cameraOn, setCameraOn] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user')
 
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
   const [capturedDescriptor, setCapturedDescriptor] = useState<number[] | null>(null)
@@ -105,10 +106,13 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
   }, [])
 
   // ── Câmera ──────────────────────────────────────────────────────────────────
-  const startCamera = useCallback(async () => {
+  const startCamera = useCallback(async (facing: 'user' | 'environment' = facingMode) => {
+    // Para o stream anterior antes de iniciar um novo
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        video: { facingMode: facing, width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       })
       if (videoRef.current) {
@@ -120,7 +124,13 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
       const msg = err instanceof Error ? err.message : 'Erro desconhecido'
       alert(`Erro ao acessar câmera: ${msg}`)
     }
-  }, [])
+  }, [facingMode])
+
+  const flipCamera = useCallback(() => {
+    const next = facingMode === 'user' ? 'environment' : 'user'
+    setFacingMode(next)
+    if (cameraOn) startCamera(next)
+  }, [facingMode, cameraOn, startCamera])
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -385,7 +395,7 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
         <div className="flex gap-2 mt-3">
           {!cameraOn ? (
             <button
-              onClick={startCamera}
+              onClick={() => startCamera()}
               disabled={!modelsLoaded}
               className="flex-1 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 rounded-lg text-sm font-semibold transition-opacity"
             >
@@ -399,6 +409,14 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
               ■ Desligar
             </button>
           )}
+          <button
+            onClick={flipCamera}
+            disabled={!modelsLoaded}
+            title={facingMode === 'user' ? 'Usar câmera traseira' : 'Usar câmera frontal'}
+            className="px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 rounded-lg text-lg transition-opacity"
+          >
+            🔄
+          </button>
           <button
             onClick={captureAndDetect}
             disabled={!cameraOn || processing || !modelsLoaded}
