@@ -131,6 +131,43 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
   // Parar câmera ao desmontar
   useEffect(() => () => { stopCamera() }, [stopCamera])
 
+  // ── Reconhecer (recebe descriptor diretamente para evitar dependência de estado assíncrono) ──
+  const recognizeDescriptor = useCallback(async (descriptor: number[]) => {
+    setRecStatus({ text: '⏳ Identificando…', type: 'loading' })
+    setProcessing(true)
+    try {
+      const res = await fetch('/api/recognize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ embedding: descriptor }),
+      })
+      const data: RecognizeResult & { error?: string } = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Erro na API')
+      setRecResult(data)
+      if (data.match) {
+        setRecStatus({
+          text: `✅ Identificado: ${data.name} (${data.confidence}% de confiança)`,
+          type: 'ok',
+        })
+      } else {
+        setRecStatus({
+          text: `❌ Rosto não reconhecido (distância: ${data.distance ?? 'N/A'})`,
+          type: 'error',
+        })
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro'
+      setRecStatus({ text: `Erro: ${msg}`, type: 'error' })
+    } finally {
+      setProcessing(false)
+    }
+  }, [])
+
+  const handleRecognize = useCallback(() => {
+    if (!capturedDescriptor) return
+    recognizeDescriptor(capturedDescriptor)
+  }, [capturedDescriptor, recognizeDescriptor])
+
   // ── Capturar e detectar rosto ───────────────────────────────────────────────
   const captureAndDetect = useCallback(async () => {
     const faceapi = faceapiRef.current
@@ -242,43 +279,6 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
       setProcessing(false)
     }
   }, [modelsLoaded, tab, recognizeDescriptor])
-
-  // ── Reconhecer (recebe descriptor diretamente para evitar dependência de estado assíncrono) ──
-  const recognizeDescriptor = useCallback(async (descriptor: number[]) => {
-    setRecStatus({ text: '⏳ Identificando…', type: 'loading' })
-    setProcessing(true)
-    try {
-      const res = await fetch('/api/recognize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ embedding: descriptor }),
-      })
-      const data: RecognizeResult & { error?: string } = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Erro na API')
-      setRecResult(data)
-      if (data.match) {
-        setRecStatus({
-          text: `✅ Identificado: ${data.name} (${data.confidence}% de confiança)`,
-          type: 'ok',
-        })
-      } else {
-        setRecStatus({
-          text: `❌ Rosto não reconhecido (distância: ${data.distance ?? 'N/A'})`,
-          type: 'error',
-        })
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Erro'
-      setRecStatus({ text: `Erro: ${msg}`, type: 'error' })
-    } finally {
-      setProcessing(false)
-    }
-  }, [])
-
-  const handleRecognize = useCallback(() => {
-    if (!capturedDescriptor) return
-    recognizeDescriptor(capturedDescriptor)
-  }, [capturedDescriptor, recognizeDescriptor])
 
   // ── Cadastrar ──────────────────────────────────────────────────────────────
   const handleRegister = useCallback(async () => {
