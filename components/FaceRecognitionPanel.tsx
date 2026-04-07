@@ -219,8 +219,9 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
 
       // ── Captura aprovada ──────────────────────────────────────────────────
       const imageData = canvas.toDataURL('image/jpeg', 0.8)
+      const descriptor = Array.from(detection.descriptor)
       setCapturedImage(imageData)
-      setCapturedDescriptor(Array.from(detection.descriptor))
+      setCapturedDescriptor(descriptor)
       setRecResult(null)
 
       const qualityWarn = score < 0.8
@@ -232,21 +233,25 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
       })
       setRecStatus({ text: '✅ Rosto capturado! Clique em Identificar.', type: 'ok' })
       setRegStatus({ text: '✅ Rosto capturado! Informe o nome e cadastre.', type: 'ok' })
+
+      // Auto-identificar ao capturar na aba Identificar
+      if (tab === 'recognize') {
+        await recognizeDescriptor(descriptor)
+      }
     } finally {
       setProcessing(false)
     }
-  }, [modelsLoaded])
+  }, [modelsLoaded, tab, recognizeDescriptor])
 
-  // ── Reconhecer ─────────────────────────────────────────────────────────────
-  const handleRecognize = useCallback(async () => {
-    if (!capturedDescriptor) return
-    setRecStatus({ text: 'Identificando...', type: 'loading' })
+  // ── Reconhecer (recebe descriptor diretamente para evitar dependência de estado assíncrono) ──
+  const recognizeDescriptor = useCallback(async (descriptor: number[]) => {
+    setRecStatus({ text: '⏳ Identificando…', type: 'loading' })
     setProcessing(true)
     try {
       const res = await fetch('/api/recognize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ embedding: capturedDescriptor }),
+        body: JSON.stringify({ embedding: descriptor }),
       })
       const data: RecognizeResult & { error?: string } = await res.json()
       if (!res.ok) throw new Error(data.error || 'Erro na API')
@@ -268,7 +273,12 @@ export default function FaceRecognitionPanel({ allowRegister }: Props) {
     } finally {
       setProcessing(false)
     }
-  }, [capturedDescriptor])
+  }, [])
+
+  const handleRecognize = useCallback(() => {
+    if (!capturedDescriptor) return
+    recognizeDescriptor(capturedDescriptor)
+  }, [capturedDescriptor, recognizeDescriptor])
 
   // ── Cadastrar ──────────────────────────────────────────────────────────────
   const handleRegister = useCallback(async () => {
