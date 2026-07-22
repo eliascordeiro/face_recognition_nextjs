@@ -56,7 +56,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
   const [cepLoading, setCepLoading] = useState(false)
   const [autoNote, setAutoNote] = useState<string | null>(null)
   const [geoPreviewLoading, setGeoPreviewLoading] = useState(false)
-  const [suggestion, setSuggestion] = useState<{ lat: string; lng: string; precision: 'cep' | 'free' } | null>(null)
+  const [suggestion, setSuggestion] = useState<{ lat: string; lng: string; precision: 'street_approx' | 'cep' | 'free'; matchedNumber?: string | null } | null>(null)
   const skipNextAutoGeo = useRef(true)
 
   function applySuggestion() {
@@ -110,11 +110,17 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
         if (!res.ok || !data.lat || !data.lng) return
 
         if (data.precision === 'street') {
-          // Alta confiança: já encontrou a rua/número — aplica direto
+          // Alta confiança: rua E número exatos encontrados — aplica direto
           setForm((f) => ({ ...f, lat: String(data.lat), lng: String(data.lng) }))
         } else {
-          // Baixa confiança (CEP/cidade): sugere, mas não sobrescreve sozinho
-          setSuggestion({ lat: String(data.lat), lng: String(data.lng), precision: data.precision })
+          // Baixa confiança (número aproximado/interpolado, só CEP/cidade, ou
+          // busca livre): sugere, mas não sobrescreve a coordenada sozinho
+          setSuggestion({
+            lat: String(data.lat),
+            lng: String(data.lng),
+            precision: data.precision,
+            matchedNumber: data.matchedNumber,
+          })
         }
       } catch {
         // Falha silenciosa — usuário pode capturar via GPS
@@ -421,13 +427,31 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
               )}
             </div>
 
-            {/* Sugestão de baixa confiança (não encontrou a rua exata) —
+            {/* Sugestão de baixa confiança (não encontrou a rua/número exatos) —
                 não substitui a coordenada atual sozinha; usuário decide. */}
             {suggestion && !geoPreviewLoading && (
               <div className="mt-2 px-3 py-2 bg-amber-900/20 border border-amber-800/60 rounded-lg flex items-center justify-between gap-2">
                 <div className="text-[11px] text-amber-300">
-                  ⚠️ Rua não localizada com exatidão — encontrada apenas uma coordenada
-                  aproximada {suggestion.precision === 'cep' ? 'da região do CEP/cidade' : 'da busca pelo endereço'}:{' '}
+                  {suggestion.precision === 'street_approx' ? (
+                    suggestion.matchedNumber ? (
+                      <>
+                        ⚠️ O OpenStreetMap não tem o número <strong>{form.number}</strong> mapeado nesta
+                        rua — o ponto mais próximo encontrado é o número{' '}
+                        <strong>{suggestion.matchedNumber}</strong>:
+                      </>
+                    ) : (
+                      <>
+                        ⚠️ O OpenStreetMap não tem números mapeados nesta rua — encontrado apenas
+                        um ponto aproximado ao longo dela (sem o número <strong>{form.number}</strong>):
+                      </>
+                    )
+                  ) : (
+                    <>
+                      ⚠️ Rua não localizada com exatidão — encontrada apenas uma coordenada
+                      aproximada {suggestion.precision === 'cep' ? 'da região do CEP/cidade' : 'da busca pelo endereço'}:
+                    </>
+                  )}
+                  {' '}
                   <span className="font-mono">{Number(suggestion.lat).toFixed(6)}, {Number(suggestion.lng).toFixed(6)}</span>.
                   {' '}Prefira capturar o GPS no local para maior precisão.
                 </div>

@@ -40,6 +40,14 @@ function cityMatches(result: NominatimResult, city: string): boolean {
   return candidates.some((c) => c.includes(normalize(city)) || normalize(city).includes(c))
 }
 
+/** Número de porta realmente encontrado no resultado (pode ser diferente do
+ *  pedido: o OSM nem sempre tem cada número mapeado individualmente — nesse
+ *  caso o Nominatim retorna o ponto conhecido mais próximo na mesma rua,
+ *  por interpolação). */
+function resultHouseNumber(result: NominatimResult): string | null {
+  return result.address?.house_number ?? null
+}
+
 // GET /api/geocode/forward — busca coordenadas aproximadas a partir de um
 // endereço, usado como complemento ao CEP (não substitui a precisão do GPS
 // capturado no local).
@@ -51,9 +59,12 @@ function cityMatches(result: NominatimResult, city: string): boolean {
 // e, em último caso, apenas pelo CEP.
 //
 // `precision` no retorno indica o nível de confiança do resultado:
-//  - "street": encontrou a rua/número informados
-//  - "cep":    encontrou apenas pela região do CEP/cidade (menos preciso)
-//  - "free":   busca livre, resultado pode não corresponder exatamente
+//  - "street":         encontrou a rua E o número exatos
+//  - "street_approx":  encontrou a rua, mas o número retornado é diferente
+//                      do informado (OSM não tem esse número mapeado —
+//                      o ponto é interpolado/aproximado na mesma rua)
+//  - "cep":            encontrou apenas pela região do CEP/cidade (menos preciso)
+//  - "free":           busca livre, resultado pode não corresponder exatamente
 export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthUser()
@@ -68,7 +79,8 @@ export async function GET(request: NextRequest) {
     const q = (searchParams.get('q') ?? '').trim()
 
     let best: NominatimResult | null = null
-    let precision: 'street' | 'cep' | 'free' | null = null
+    let precision: 'street' | 'street_approx' | 'cep' | 'free' | null = null
+    let matchedNumber: string | null = null
 
     // 1) Busca estruturada com rua + número (mais precisa). A cidade ajuda a
     // desambiguar, mas não é obrigatória quando já temos o CEP (que também
@@ -87,7 +99,14 @@ export async function GET(request: NextRequest) {
       const result = await nominatim(structured)
       if (result && cityMatches(result, city)) {
         best = result
-        precision = 'street'
+        const foundNumber = resultHouseNumber(result)
+        matchedNumber = foundNumber
+        // Se um número foi pedido, só é "street" (alta confiança) quando o
+        // OSM realmente tem ESSE número mapeado (addresstype 'house'/'building').
+        // Sem casa mapeada (ex.: Nominatim só achou a via, sem house_number —
+        // caso comum em ruas/rodovias com poucos endereços no OpenStreetMap),
+        // ou com um número diferente do pedido, o ponto é aproximado.
+        precision = !number || foundNumber === number ? 'street' : 'street_approx'
       }
     }
 
@@ -116,7 +135,12 @@ export async function GET(request: NextRequest) {
     }
 
     if (!best) return NextResponse.json({ lat: null, lng: null, precision: null })
-    return NextResponse.json({ lat: parseFloat(best.lat), lng: parseFloat(best.lon), precision })
+    return NextResponse.json({
+      lat: parseFloat(best.lat),
+      lng: parseFloat(best.lon),
+      precision,
+      matchedNumber: precision === 'street_approx' ? matchedNumber : null,
+    })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Erro interno'
     return NextResponse.json({ error: msg }, { status: 500 })
