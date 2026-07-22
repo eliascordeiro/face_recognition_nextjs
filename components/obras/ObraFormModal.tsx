@@ -162,6 +162,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
       const res = await fetch(`/api/geocode/reverse?lat=${lat}&lng=${lng}`)
       const data = await res.json()
       if (res.ok && data.raw) {
+        const previousNumber = form.number
         setForm((f) => ({
           ...f,
           cep: data.raw.postcode ? formatCep(data.raw.postcode) : f.cep,
@@ -171,7 +172,17 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
           city: data.raw.city || f.city,
           state: data.raw.state ? data.raw.state.slice(0, 2).toUpperCase() : f.state,
         }))
-        setAutoNote('📍 Endereço preenchido automaticamente pelo GPS — confira e ajuste se necessário.')
+        // O GPS localiza o ponto exato, mas o NÚMERO só vem certo se o
+        // OpenStreetMap tiver esse endereço mapeado com número de porta —
+        // caso contrário (comum em rodovias/áreas rurais), mantemos o que
+        // o usuário já tinha digitado e avisamos, em vez de apagar/adivinhar.
+        setAutoNote(
+          data.precision === 'house'
+            ? '📍 Endereço completo (incluindo número) confirmado pelo GPS.'
+            : previousNumber
+              ? `📍 Localização confirmada pelo GPS — o OpenStreetMap não tem o número mapeado nesta rua, mantido o número ${previousNumber} que você informou.`
+              : '📍 Localização confirmada pelo GPS — o OpenStreetMap não tem o número mapeado nesta rua; informe o número manualmente.'
+        )
       }
     } catch {
       // Falha silenciosa: usuário pode digitar o endereço manualmente

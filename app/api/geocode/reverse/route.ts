@@ -45,6 +45,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       address: parts.join(', ') || data.display_name || null,
+      // "house": o GPS caiu sobre um ponto com número de porta mapeado no
+      // OpenStreetMap (endereço completo confirmado). "street": só a rua foi
+      // identificada — o OSM não tem o número exato dessa posição mapeado
+      // (comum em rodovias/áreas rurais); o campo Número deve ser mantido
+      // conforme informado pelo usuário.
+      precision: houseNumber ? 'house' : 'street',
       raw: {
         street, houseNumber, neighbourhood, city, state,
         postcode: a.postcode || '',
