@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     const result = await pool.query(
       `SELECT id, name, (embedding <-> $1::vector) AS distance
        FROM persons
-       WHERE client_id = $2
+       WHERE client_id = $2 AND embedding IS NOT NULL
        ORDER BY distance ASC
        LIMIT 1`,
       [vectorStr, auth.clientId]

@@ -44,11 +44,13 @@ export async function initDb(): Promise<void> {
     }
 
     // ── Tabela de funcionários ────────────────────────────────────────────
+    // embedding é opcional: o funcionário pode ser cadastrado primeiro (dados
+    // pessoais) e ter o reconhecimento facial vinculado depois, via botão/modal.
     await client.query(`
       CREATE TABLE IF NOT EXISTS persons (
         id         SERIAL PRIMARY KEY,
         name       VARCHAR(255) NOT NULL,
-        embedding  vector(128)  NOT NULL,
+        embedding  vector(128),
         thumbnail  TEXT,
         client_id  INTEGER REFERENCES users(id) ON DELETE CASCADE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -56,6 +58,13 @@ export async function initDb(): Promise<void> {
     `)
     await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id) ON DELETE CASCADE`)
     await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`)
+    await client.query(`ALTER TABLE persons ALTER COLUMN embedding DROP NOT NULL`)
+    // Campos adicionais — preparam o cadastro para futuras funcionalidades
+    // (ex.: liberar acesso do funcionário ao sistema/app).
+    await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS email VARCHAR(255)`)
+    await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS document VARCHAR(20)`)
+    await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS role VARCHAR(100)`)
+    await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE`)
 
     // Campos de perfil no usuário (cliente: endereço, telefone, GPS)
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`)
