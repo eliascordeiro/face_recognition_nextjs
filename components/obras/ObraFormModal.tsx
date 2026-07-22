@@ -34,6 +34,20 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [gpsLoading, setGpsLoading] = useState(false)
+  const [addressAutoFilled, setAddressAutoFilled] = useState(false)
+
+  async function reverseGeocode(lat: number, lng: number) {
+    try {
+      const res = await fetch(`/api/geocode/reverse?lat=${lat}&lng=${lng}`)
+      const data = await res.json()
+      if (res.ok && data.address) {
+        setForm((f) => ({ ...f, address: data.address }))
+        setAddressAutoFilled(true)
+      }
+    } catch {
+      // Falha silenciosa: usuário pode digitar o endereço manualmente
+    }
+  }
 
   function captureGPS() {
     if (!navigator.geolocation) {
@@ -41,13 +55,17 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
       return
     }
     setGpsLoading(true)
+    setAddressAutoFilled(false)
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
+        const lat = pos.coords.latitude
+        const lng = pos.coords.longitude
         setForm((f) => ({
           ...f,
-          lat: pos.coords.latitude.toFixed(8),
-          lng: pos.coords.longitude.toFixed(8),
+          lat: lat.toFixed(8),
+          lng: lng.toFixed(8),
         }))
+        await reverseGeocode(lat, lng)
         setGpsLoading(false)
       },
       (err) => {
@@ -159,10 +177,13 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
             <input
               type="text"
               value={form.address}
-              onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+              onChange={(e) => { setForm((f) => ({ ...f, address: e.target.value })); setAddressAutoFilled(false) }}
               placeholder="Rua, número, bairro, cidade"
               className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
             />
+            {addressAutoFilled && (
+              <p className="text-[11px] text-emerald-400 mt-1">📍 Endereço preenchido automaticamente pelo GPS — confira e ajuste se necessário.</p>
+            )}
           </div>
 
           <div>
@@ -174,7 +195,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
                 disabled={gpsLoading}
                 className="text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50"
               >
-                {gpsLoading ? '⏳ Obtendo…' : '📡 Capturar GPS'}
+                {gpsLoading ? '⏳ Obtendo localização e endereço…' : '📡 Capturar GPS'}
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2">
