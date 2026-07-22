@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
+import { hasMapboxToken, mapboxReverse } from '@/lib/mapbox'
 
 // GET /api/geocode/reverse?lat=..&lng=.. — geocodificação reversa (GPS → endereço)
-// Faz proxy para o Nominatim (OpenStreetMap) no servidor, evitando problemas de
-// CORS no navegador e respeitando a política de uso (User-Agent identificado).
+// Usa Mapbox (quando configurado, via MAPBOX_TOKEN) como provedor principal —
+// cobertura de números de porta bem melhor que o OSM no Brasil. Sem token
+// configurado, ou sem resultado, cai no Nominatim (OpenStreetMap, gratuito)
+// como fallback, via proxy no servidor (evita CORS no navegador e respeita a
+// política de uso com um User-Agent identificado).
 export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthUser()
@@ -14,6 +18,22 @@ export async function GET(request: NextRequest) {
     const lng = parseFloat(searchParams.get('lng') ?? '')
     if (!isFinite(lat) || !isFinite(lng)) {
       return NextResponse.json({ error: 'lat/lng inválidos' }, { status: 422 })
+    }
+
+    if (hasMapboxToken()) {
+      const mb = await mapboxReverse(lat, lng)
+      if (mb) {
+        return NextResponse.json({
+          address: mb.address,
+          precision: mb.precision,
+          raw: {
+            street: mb.street, houseNumber: mb.houseNumber,
+            neighbourhood: mb.neighbourhood, city: mb.city, state: mb.state,
+            postcode: mb.postcode,
+          },
+        })
+      }
+      // Sem resultado no Mapbox: cai para o fallback via Nominatim abaixo.
     }
 
     const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`

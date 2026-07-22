@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
+import { hasMapboxToken, mapboxForward } from '@/lib/mapbox'
 
 const HEADERS = {
   'User-Agent': 'controle-de-obras-app/1.0 (uso interno, cadastro de obras)',
@@ -81,6 +82,21 @@ export async function GET(request: NextRequest) {
     let best: NominatimResult | null = null
     let precision: 'street' | 'street_approx' | 'cep' | 'free' | null = null
     let matchedNumber: string | null = null
+
+    // 0) Mapbox (quando configurado) — provedor principal, com cobertura de
+    // números de porta bem mais completa que o OSM/Nominatim no Brasil.
+    if (hasMapboxToken()) {
+      const mb = await mapboxForward({ street, number, city, state, cep })
+      if (mb) {
+        return NextResponse.json({
+          lat: mb.lat,
+          lng: mb.lng,
+          precision: mb.precision === 'house' ? 'street' : 'street_approx',
+          matchedNumber: mb.precision === 'house' ? null : mb.matchedNumber,
+        })
+      }
+      // Sem resultado no Mapbox: cai para o fallback via Nominatim abaixo.
+    }
 
     // 1) Busca estruturada com rua + número (mais precisa). A cidade ajuda a
     // desambiguar, mas não é obrigatória quando já temos o CEP (que também
