@@ -11,6 +11,12 @@ interface Obra {
   description: string | null
   status: string
   start_date: string | null
+  cep: string | null
+  street: string | null
+  number: string | null
+  neighborhood: string | null
+  city: string | null
+  state: string | null
   address: string | null
   lat: number | null
   lng: number | null
@@ -205,7 +211,12 @@ export default function ObrasPage() {
             description: modal.obra.description ?? '',
             status: modal.obra.status,
             startDate: modal.obra.start_date ?? '',
-            address: modal.obra.address ?? '',
+            cep: modal.obra.cep ?? '',
+            street: modal.obra.street ?? '',
+            number: modal.obra.number ?? '',
+            neighborhood: modal.obra.neighborhood ?? '',
+            city: modal.obra.city ?? '',
+            state: modal.obra.state ?? '',
             lat: modal.obra.lat != null ? String(modal.obra.lat) : '',
             lng: modal.obra.lng != null ? String(modal.obra.lng) : '',
           } as ObraFormData : undefined}

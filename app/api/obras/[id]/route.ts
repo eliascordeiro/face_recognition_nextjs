@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
+import { composeAddress, cleanCep, cleanStr, cleanState } from '@/lib/address'
 
 const VALID_STATUS = ['planning', 'in_progress', 'paused', 'completed']
 
@@ -16,7 +17,9 @@ export async function GET(
 
     const { id } = await params
     const { rows } = await pool.query(
-      `SELECT id, name, description, status, start_date, address, lat, lng, created_at
+      `SELECT id, name, description, status, start_date,
+              cep, street, number, neighborhood, city, state,
+              address, lat, lng, created_at
        FROM obras WHERE id = $1 AND client_id = $2`,
       [Number(id), auth.clientId]
     )
@@ -46,23 +49,34 @@ export async function PATCH(
     }
 
     const { id } = await params
-    const { name, description, status, startDate, address, lat, lng } = await request.json()
+    const body = await request.json()
+    const { name, description, status, startDate, lat, lng } = body
 
     if (typeof name !== 'string' || name.trim().length < 2) {
       return NextResponse.json({ error: 'Nome da obra é obrigatório' }, { status: 422 })
     }
     const cleanStatus = VALID_STATUS.includes(status) ? status : 'planning'
 
+    const cep = cleanCep(body.cep)
+    const street = cleanStr(body.street, 255)
+    const number = cleanStr(body.number, 20)
+    const neighborhood = cleanStr(body.neighborhood, 150)
+    const city = cleanStr(body.city, 150)
+    const state = cleanState(body.state)
+    const address = composeAddress({ cep, street, number, neighborhood, city, state })
+
     const { rows, rowCount } = await pool.query(
-      `UPDATE obras SET name = $1, description = $2, status = $3, start_date = $4, address = $5, lat = $6, lng = $7
-       WHERE id = $8 AND client_id = $9
-       RETURNING id, name, description, status, start_date, address, lat, lng, created_at`,
+      `UPDATE obras SET name = $1, description = $2, status = $3, start_date = $4,
+              cep = $5, street = $6, number = $7, neighborhood = $8, city = $9, state = $10,
+              address = $11, lat = $12, lng = $13
+       WHERE id = $14 AND client_id = $15
+       RETURNING id, name, description, status, start_date, cep, street, number, neighborhood, city, state, address, lat, lng, created_at`,
       [
         name.trim(),
         typeof description === 'string' ? description.trim() || null : null,
         cleanStatus,
         typeof startDate === 'string' && startDate ? startDate : null,
-        typeof address === 'string' ? address.trim() || null : null,
+        cep, street, number, neighborhood, city, state, address,
         typeof lat === 'number' && isFinite(lat) ? lat : null,
         typeof lng === 'number' && isFinite(lng) ? lng : null,
         Number(id),

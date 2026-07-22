@@ -88,6 +88,14 @@ export async function initDb(): Promise<void> {
     await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS description TEXT`)
     await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'planning'`)
     await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS start_date DATE`)
+    // Endereço estruturado (CEP, rua, número, bairro, cidade, UF).
+    // `address` é mantido como texto derivado (exibição/link do mapa).
+    await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS cep VARCHAR(9)`)
+    await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS street VARCHAR(255)`)
+    await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS number VARCHAR(20)`)
+    await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS neighborhood VARCHAR(150)`)
+    await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS city VARCHAR(150)`)
+    await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS state VARCHAR(2)`)
 
     // Vincula funcionários (persons) a uma obra específica
     await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL`)
