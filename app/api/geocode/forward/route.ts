@@ -6,12 +6,38 @@ const HEADERS = {
   'Accept-Language': 'pt-BR',
 }
 
-async function nominatim(params: URLSearchParams) {
+interface NominatimResult {
+  lat: string
+  lon: string
+  address?: Record<string, string>
+}
+
+function normalize(s: string): string {
+  return s
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .toLowerCase().trim()
+}
+
+async function nominatim(params: URLSearchParams): Promise<NominatimResult | null> {
+  params.set('addressdetails', '1')
   const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`
   const res = await fetch(url, { headers: HEADERS })
   if (!res.ok) throw new Error('Falha ao consultar serviço de geocodificação')
   const data = await res.json()
   return Array.isArray(data) && data.length > 0 ? data[0] : null
+}
+
+/** Confere se a cidade retornada pelo Nominatim bate com a cidade digitada
+ *  pelo usuário — evita aceitar um resultado de outra região/estado quando a
+ *  busca por rua não encontra o logradouro exato e o serviço "adivinha"
+ *  um lugar qualquer com nome parecido. */
+function cityMatches(result: NominatimResult, city: string): boolean {
+  if (!city) return true
+  const addr = result.address ?? {}
+  const candidates = [addr.city, addr.town, addr.village, addr.municipality, addr.county]
+    .filter(Boolean)
+    .map((c) => normalize(c as string))
+  return candidates.some((c) => c.includes(normalize(city)) || normalize(city).includes(c))
 }
 
 // GET /api/geocode/forward — busca coordenadas aproximadas a partir de um
@@ -23,6 +49,11 @@ async function nominatim(params: URLSearchParams) {
 // da cidade quando número/rua são informados. Se a busca estruturada não
 // encontrar nada (ex.: endereço muito novo), tenta como busca livre (`q`)
 // e, em último caso, apenas pelo CEP.
+//
+// `precision` no retorno indica o nível de confiança do resultado:
+//  - "street": encontrou a rua/número informados
+//  - "cep":    encontrou apenas pela região do CEP/cidade (menos preciso)
+//  - "free":   busca livre, resultado pode não corresponder exatamente
 export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthUser()
@@ -36,7 +67,8 @@ export async function GET(request: NextRequest) {
     const cep = (searchParams.get('cep') ?? '').replace(/\D/g, '')
     const q = (searchParams.get('q') ?? '').trim()
 
-    let best: { lat: string; lon: string } | null = null
+    let best: NominatimResult | null = null
+    let precision: 'street' | 'cep' | 'free' | null = null
 
     // 1) Busca estruturada com rua + número (mais precisa)
     if (street && city) {
@@ -49,7 +81,11 @@ export async function GET(request: NextRequest) {
       })
       if (state) structured.set('state', state)
       if (cep) structured.set('postalcode', cep)
-      best = await nominatim(structured)
+      const result = await nominatim(structured)
+      if (result && cityMatches(result, city)) {
+        best = result
+        precision = 'street'
+      }
     }
 
     // 2) Sem número/rua reconhecido: tenta pelo menos CEP + cidade (estruturado)
@@ -59,17 +95,25 @@ export async function GET(request: NextRequest) {
       })
       if (city) byCep.set('city', city)
       if (state) byCep.set('state', state)
-      best = await nominatim(byCep)
+      const result = await nominatim(byCep)
+      if (result && cityMatches(result, city)) {
+        best = result
+        precision = 'cep'
+      }
     }
 
-    // 3) Fallback: busca livre (texto único)
+    // 3) Fallback: busca livre (texto único) — só aceita se a cidade bater
     if (!best && q.length >= 5) {
       const free = new URLSearchParams({ format: 'jsonv2', q, countrycodes: 'br', limit: '1' })
-      best = await nominatim(free)
+      const result = await nominatim(free)
+      if (result && cityMatches(result, city)) {
+        best = result
+        precision = 'free'
+      }
     }
 
-    if (!best) return NextResponse.json({ lat: null, lng: null })
-    return NextResponse.json({ lat: parseFloat(best.lat), lng: parseFloat(best.lon) })
+    if (!best) return NextResponse.json({ lat: null, lng: null, precision: null })
+    return NextResponse.json({ lat: parseFloat(best.lat), lng: parseFloat(best.lon), precision })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Erro interno'
     return NextResponse.json({ error: msg }, { status: 500 })

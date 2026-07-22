@@ -56,12 +56,24 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
   const [cepLoading, setCepLoading] = useState(false)
   const [autoNote, setAutoNote] = useState<string | null>(null)
   const [geoPreviewLoading, setGeoPreviewLoading] = useState(false)
+  const [suggestion, setSuggestion] = useState<{ lat: string; lng: string; precision: 'cep' | 'free' } | null>(null)
   const skipNextAutoGeo = useRef(true)
 
+  function applySuggestion() {
+    if (!suggestion) return
+    setForm((f) => ({ ...f, lat: suggestion.lat, lng: suggestion.lng }))
+    setSuggestion(null)
+  }
+
   // Enquanto o usuário completa rua/número/bairro/cidade/UF manualmente,
-  // busca (com debounce) as coordenadas aproximadas do endereço, para dar
-  // um retorno visual imediato de onde a obra está localizada — sem
-  // precisar estar fisicamente no local para usar o GPS.
+  // busca (com debounce) as coordenadas do endereço para dar um retorno
+  // visual de onde a obra está localizada — sem precisar estar no local.
+  //
+  // Importante: só substitui a coordenada automaticamente quando o resultado
+  // é de alta confiança (rua/número encontrados). Resultados aproximados
+  // (nível de CEP/cidade) NUNCA sobrescrevem uma coordenada já definida
+  // (ex.: capturada por GPS no local) — ficam disponíveis como sugestão,
+  // que o usuário aplica manualmente se quiser.
   useEffect(() => {
     // Não dispara na primeira renderização (edição já vem com dados prontos)
     if (skipNextAutoGeo.current) {
@@ -69,7 +81,10 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
       return
     }
     const hasEnoughInfo = form.street.trim().length >= 3 && form.city.trim().length >= 2 && form.state.length === 2
-    if (!hasEnoughInfo) return
+    if (!hasEnoughInfo) {
+      setSuggestion(null)
+      return
+    }
 
     const timer = setTimeout(async () => {
       const params = new URLSearchParams({
@@ -82,11 +97,18 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
       if (cepDigits.length === 8) params.set('cep', cepDigits)
 
       setGeoPreviewLoading(true)
+      setSuggestion(null)
       try {
         const res = await fetch(`/api/geocode/forward?${params.toString()}`)
         const data = await res.json()
-        if (res.ok && data.lat && data.lng) {
+        if (!res.ok || !data.lat || !data.lng) return
+
+        if (data.precision === 'street') {
+          // Alta confiança: já encontrou a rua/número — aplica direto
           setForm((f) => ({ ...f, lat: String(data.lat), lng: String(data.lng) }))
+        } else {
+          // Baixa confiança (CEP/cidade): sugere, mas não sobrescreve sozinho
+          setSuggestion({ lat: String(data.lat), lng: String(data.lng), precision: data.precision })
         }
       } catch {
         // Falha silenciosa — usuário pode capturar via GPS
@@ -151,6 +173,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
     }
     setGpsLoading(true)
     setAutoNote(null)
+    setSuggestion(null)
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const lat = pos.coords.latitude
@@ -391,9 +414,30 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
                 </a>
               )}
             </div>
+
+            {/* Sugestão de baixa confiança (não encontrou a rua exata) —
+                não substitui a coordenada atual sozinha; usuário decide. */}
+            {suggestion && !geoPreviewLoading && (
+              <div className="mt-2 px-3 py-2 bg-amber-900/20 border border-amber-800/60 rounded-lg flex items-center justify-between gap-2">
+                <div className="text-[11px] text-amber-300">
+                  ⚠️ Rua não localizada com exatidão — encontrada apenas uma coordenada
+                  aproximada {suggestion.precision === 'cep' ? 'da região do CEP/cidade' : 'da busca pelo endereço'}:{' '}
+                  <span className="font-mono">{Number(suggestion.lat).toFixed(6)}, {Number(suggestion.lng).toFixed(6)}</span>.
+                  {' '}Prefira capturar o GPS no local para maior precisão.
+                </div>
+                <button
+                  type="button"
+                  onClick={applySuggestion}
+                  className="text-[11px] px-2 py-1 bg-amber-700/60 hover:bg-amber-700 rounded whitespace-nowrap"
+                >
+                  Usar assim mesmo
+                </button>
+              </div>
+            )}
           </div>
 
           {error && <p className="text-red-400 text-sm">{error}</p>}
+
 
           <div className="flex gap-2 pt-2">
             <button
