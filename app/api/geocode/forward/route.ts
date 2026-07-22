@@ -70,15 +70,18 @@ export async function GET(request: NextRequest) {
     let best: NominatimResult | null = null
     let precision: 'street' | 'cep' | 'free' | null = null
 
-    // 1) Busca estruturada com rua + número (mais precisa)
-    if (street && city) {
+    // 1) Busca estruturada com rua + número (mais precisa). A cidade ajuda a
+    // desambiguar, mas não é obrigatória quando já temos o CEP (que também
+    // localiza a região) — importante para buscar assim que CEP + rua/número
+    // forem preenchidos, mesmo antes do campo Cidade ser confirmado.
+    if (street && (city || cep)) {
       const structured = new URLSearchParams({
         format: 'jsonv2',
         street: [number, street].filter(Boolean).join(' '),
-        city,
         country: 'Brazil',
         limit: '1',
       })
+      if (city) structured.set('city', city)
       if (state) structured.set('state', state)
       if (cep) structured.set('postalcode', cep)
       const result = await nominatim(structured)

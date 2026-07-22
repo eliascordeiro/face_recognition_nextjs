@@ -80,7 +80,14 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
       skipNextAutoGeo.current = false
       return
     }
-    const hasEnoughInfo = form.street.trim().length >= 3 && form.city.trim().length >= 2 && form.state.length === 2
+    // Dispara assim que houver rua + (CEP ou cidade/UF) — não é preciso
+    // esperar o campo Cidade ser confirmado quando o CEP já foi informado,
+    // já que o CEP sozinho localiza bem a região. Isso permite buscar as
+    // coordenadas logo após CEP + Número/Rua serem preenchidos.
+    const cepDigits = form.cep.replace(/\D/g, '')
+    const hasEnoughInfo =
+      form.street.trim().length >= 3 &&
+      (cepDigits.length === 8 || (form.city.trim().length >= 2 && form.state.length === 2))
     if (!hasEnoughInfo) {
       setSuggestion(null)
       return
@@ -93,7 +100,6 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
         city: form.city,
         state: form.state,
       })
-      const cepDigits = form.cep.replace(/\D/g, '')
       if (cepDigits.length === 8) params.set('cep', cepDigits)
 
       setGeoPreviewLoading(true)
