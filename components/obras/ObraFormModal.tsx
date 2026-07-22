@@ -72,17 +72,18 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
     if (!hasEnoughInfo) return
 
     const timer = setTimeout(async () => {
-      const q = [
-        [form.street, form.number].filter(Boolean).join(', '),
-        form.neighborhood,
-        form.city,
-        form.state,
-        'Brasil',
-      ].filter(Boolean).join(', ')
+      const params = new URLSearchParams({
+        street: form.street,
+        number: form.number,
+        city: form.city,
+        state: form.state,
+      })
+      const cepDigits = form.cep.replace(/\D/g, '')
+      if (cepDigits.length === 8) params.set('cep', cepDigits)
 
       setGeoPreviewLoading(true)
       try {
-        const res = await fetch(`/api/geocode/forward?q=${encodeURIComponent(q)}`)
+        const res = await fetch(`/api/geocode/forward?${params.toString()}`)
         const data = await res.json()
         if (res.ok && data.lat && data.lng) {
           setForm((f) => ({ ...f, lat: String(data.lat), lng: String(data.lng) }))
@@ -96,7 +97,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
 
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.street, form.number, form.neighborhood, form.city, form.state])
+  }, [form.street, form.number, form.neighborhood, form.city, form.state, form.cep])
 
   async function lookupCep(rawCep: string) {
     const digits = rawCep.replace(/\D/g, '')
