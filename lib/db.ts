@@ -84,6 +84,13 @@ export async function initDb(): Promise<void> {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )
     `)
+    // Detalhes adicionais da obra: descrição, status do andamento e data de início
+    await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS description TEXT`)
+    await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'planning'`)
+    await client.query(`ALTER TABLE obras ADD COLUMN IF NOT EXISTS start_date DATE`)
+
+    // Vincula funcionários (persons) a uma obra específica
+    await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL`)
 
     await client.query(`
       CREATE INDEX IF NOT EXISTS persons_embedding_hnsw_idx

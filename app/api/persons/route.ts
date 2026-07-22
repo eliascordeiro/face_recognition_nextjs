@@ -16,7 +16,7 @@ export async function GET() {
     if (!auth || !auth.clientId) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
     const { rows } = await pool.query(
-      `SELECT id, name, phone, email, document, role, active, thumbnail, created_at,
+      `SELECT id, name, phone, email, document, role, active, thumbnail, created_at, obra_id,
               (embedding IS NOT NULL) AS has_face
        FROM persons WHERE client_id = $1 ORDER BY created_at DESC`,
       [auth.clientId]

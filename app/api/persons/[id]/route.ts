@@ -52,6 +52,13 @@ export async function PATCH(
     if (typeof body.active === 'boolean') {
       fields.push(`active = $${i++}`); values.push(body.active)
     }
+    if ('obraId' in body) {
+      const obraId = body.obraId
+      if (obraId !== null && (typeof obraId !== 'number' || !Number.isFinite(obraId))) {
+        return NextResponse.json({ error: 'obraId inválido' }, { status: 422 })
+      }
+      fields.push(`obra_id = $${i++}`); values.push(obraId)
+    }
     if (body.embedding != null) {
       const emb = parseEmbedding(body.embedding)
       fields.push(`embedding = $${i++}::vector`); values.push(`[${emb.join(',')}]`)
@@ -68,7 +75,7 @@ export async function PATCH(
     const { rows } = await pool.query(
       `UPDATE persons SET ${fields.join(', ')}
        WHERE id = $${i++} AND client_id = $${i++}
-       RETURNING id, name, phone, email, document, role, active, thumbnail, created_at, (embedding IS NOT NULL) AS has_face`,
+       RETURNING id, name, phone, email, document, role, active, thumbnail, created_at, obra_id, (embedding IS NOT NULL) AS has_face`,
       values
     )
     if (rows.length === 0) {
