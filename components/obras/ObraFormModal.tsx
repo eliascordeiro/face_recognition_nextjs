@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 
 export interface ObraFormData {
   id?: number
@@ -55,6 +55,48 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
   const [gpsLoading, setGpsLoading] = useState(false)
   const [cepLoading, setCepLoading] = useState(false)
   const [autoNote, setAutoNote] = useState<string | null>(null)
+  const [geoPreviewLoading, setGeoPreviewLoading] = useState(false)
+  const skipNextAutoGeo = useRef(true)
+
+  // Enquanto o usuário completa rua/número/bairro/cidade/UF manualmente,
+  // busca (com debounce) as coordenadas aproximadas do endereço, para dar
+  // um retorno visual imediato de onde a obra está localizada — sem
+  // precisar estar fisicamente no local para usar o GPS.
+  useEffect(() => {
+    // Não dispara na primeira renderização (edição já vem com dados prontos)
+    if (skipNextAutoGeo.current) {
+      skipNextAutoGeo.current = false
+      return
+    }
+    const hasEnoughInfo = form.street.trim().length >= 3 && form.city.trim().length >= 2 && form.state.length === 2
+    if (!hasEnoughInfo) return
+
+    const timer = setTimeout(async () => {
+      const q = [
+        [form.street, form.number].filter(Boolean).join(', '),
+        form.neighborhood,
+        form.city,
+        form.state,
+        'Brasil',
+      ].filter(Boolean).join(', ')
+
+      setGeoPreviewLoading(true)
+      try {
+        const res = await fetch(`/api/geocode/forward?q=${encodeURIComponent(q)}`)
+        const data = await res.json()
+        if (res.ok && data.lat && data.lng) {
+          setForm((f) => ({ ...f, lat: String(data.lat), lng: String(data.lng) }))
+        }
+      } catch {
+        // Falha silenciosa — usuário pode capturar via GPS
+      } finally {
+        setGeoPreviewLoading(false)
+      }
+    }, 900)
+
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.street, form.number, form.neighborhood, form.city, form.state])
 
   async function lookupCep(rawCep: string) {
     const digits = rawCep.replace(/\D/g, '')
@@ -73,21 +115,6 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
         state: data.state || f.state,
       }))
       setAutoNote('📮 Endereço preenchido a partir do CEP — confira o número e complemente se necessário.')
-
-      // Tenta obter coordenadas aproximadas a partir do endereço encontrado
-      // (não sobrescreve um GPS já capturado no local, que é mais preciso).
-      if (!form.lat && !form.lng) {
-        const q = [data.street, data.city, data.state, 'Brasil'].filter(Boolean).join(', ')
-        try {
-          const geoRes = await fetch(`/api/geocode/forward?q=${encodeURIComponent(q)}`)
-          const geoData = await geoRes.json()
-          if (geoRes.ok && geoData.lat && geoData.lng) {
-            setForm((f) => ({ ...f, lat: String(geoData.lat), lng: String(geoData.lng) }))
-          }
-        } catch {
-          // Falha silenciosa — coordenadas podem ser capturadas via GPS depois
-        }
-      }
     } catch {
       setError('Falha ao consultar o CEP.')
     } finally {
@@ -127,6 +154,9 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
       async (pos) => {
         const lat = pos.coords.latitude
         const lng = pos.coords.longitude
+        // Evita que o preview automático (debounce) sobrescreva com uma
+        // coordenada menos precisa logo após o GPS preencher os campos.
+        skipNextAutoGeo.current = true
         setForm((f) => ({ ...f, lat: lat.toFixed(8), lng: lng.toFixed(8) }))
         await reverseGeocode(lat, lng)
         setGpsLoading(false)
@@ -335,16 +365,31 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
               <p className="text-[11px] text-emerald-400 mt-2">{autoNote}</p>
             )}
 
-            {form.lat && form.lng && (
-              <a
-                href={`https://maps.google.com/?q=${form.lat},${form.lng}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[11px] text-sky-500 hover:text-sky-400 mt-2 inline-block"
-              >
-                ↗ Verificar no Google Maps ({Number(form.lat).toFixed(6)}, {Number(form.lng).toFixed(6)})
-              </a>
-            )}
+            {/* Preview de coordenadas — atualiza conforme o endereço é preenchido */}
+            <div className="mt-3 px-3 py-2 bg-slate-900/60 border border-slate-700 rounded-lg flex items-center justify-between gap-2">
+              <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                <span>🛰️</span>
+                {geoPreviewLoading ? (
+                  <span className="text-sky-400 animate-pulse">Localizando coordenadas…</span>
+                ) : form.lat && form.lng ? (
+                  <span className="font-mono text-slate-300">
+                    {Number(form.lat).toFixed(6)}, {Number(form.lng).toFixed(6)}
+                  </span>
+                ) : (
+                  <span>Complete o endereço ou capture o GPS para ver as coordenadas</span>
+                )}
+              </div>
+              {form.lat && form.lng && !geoPreviewLoading && (
+                <a
+                  href={`https://maps.google.com/?q=${form.lat},${form.lng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-sky-500 hover:text-sky-400 whitespace-nowrap"
+                >
+                  ↗ Ver no mapa
+                </a>
+              )}
+            </div>
           </div>
 
           {error && <p className="text-red-400 text-sm">{error}</p>}
