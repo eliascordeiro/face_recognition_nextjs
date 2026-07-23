@@ -63,6 +63,8 @@ export default function OperatorsPage() {
           username: formData.username,
           password: formData.password,
           fullName: formData.fullName,
+          permissions: permForm.permissions,
+          obraId: permForm.obraId,
         }),
       })
       const data = await res.json()
@@ -70,6 +72,7 @@ export default function OperatorsPage() {
       setOperators((prev) => [...prev, data])
       setModal(null)
       setFormData({ username: '', password: '', fullName: '' })
+      setPermForm({ permissions: [], obraId: null })
     } finally {
       setFormLoading(false)
     }
@@ -97,6 +100,7 @@ export default function OperatorsPage() {
 
   function openCreate() {
     setFormData({ username: '', password: '', fullName: '' })
+    setPermForm({ permissions: [], obraId: null })
     setFormError(null)
     setModal('create')
   }
@@ -238,7 +242,7 @@ export default function OperatorsPage() {
       {/* Modal: Criar operador */}
       {modal === 'create' && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-sm">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-4">Novo operador</h3>
             <form onSubmit={handleCreateOperator} className="space-y-3">
               <div>
@@ -274,6 +278,40 @@ export default function OperatorsPage() {
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
                 />
               </div>
+
+              <div className="pt-2 border-t border-slate-700/70">
+                <p className="text-xs text-slate-400 mt-3 mb-2">
+                  👁️ Identificar rosto sempre liberado. Marque o que mais esse operador pode fazer:
+                </p>
+                <div className="space-y-2">
+                  {OPERATOR_CAPABILITIES.map((cap) => (
+                    <label key={cap} className="flex items-center gap-2 text-sm bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 cursor-pointer hover:border-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={permForm.permissions.includes(cap)}
+                        onChange={() => toggleCapability(cap)}
+                        className="accent-sky-500"
+                      />
+                      {CAPABILITY_LABELS[cap]}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Restringir a uma obra (opcional)</label>
+                <select
+                  value={permForm.obraId ?? ''}
+                  onChange={(e) => setPermForm((f) => ({ ...f, obraId: e.target.value ? Number(e.target.value) : null }))}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
+                >
+                  <option value="">Todas as obras do cliente</option>
+                  {obras.map((o) => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
+                </select>
+              </div>
+
               {formError && <p className="text-red-400 text-sm">{formError}</p>}
               <div className="flex gap-2 pt-2">
                 <button

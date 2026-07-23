@@ -27,6 +27,22 @@ export async function GET() {
     })
   }
 
+  // Para operadores vinculados a uma obra, resolve o nome para exibição
+  if (user.role === 'operator' && user.obraId) {
+    await initDb()
+    const { rows } = await pool.query(`SELECT name FROM obras WHERE id = $1`, [Number(user.obraId)])
+    return NextResponse.json({
+      id: user.sub,
+      username: user.username,
+      role: user.role,
+      clientId: user.clientId,
+      fullName: user.fullName,
+      permissions: user.permissions,
+      obraId: user.obraId,
+      obraName: rows[0]?.name ?? null,
+    })
+  }
+
   return NextResponse.json({
     id: user.sub,
     username: user.username,

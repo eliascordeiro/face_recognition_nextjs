@@ -80,7 +80,9 @@ export default function OperatorEmployeesPage() {
           <h1 className="text-2xl font-bold text-slate-100">🧑‍💼 Funcionários</h1>
           <p className="text-slate-400 text-sm mt-0.5">
             {employees.length} cadastrado{employees.length !== 1 ? 's' : ''}
-            {auth?.obraId && <span className="text-amber-400"> · escopo restrito à sua obra</span>}
+            {auth?.obraId && (
+              <span className="text-amber-400"> · restrito à obra {auth.obraName ?? ''}</span>
+            )}
           </p>
         </div>
         {canManage && (

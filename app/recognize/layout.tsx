@@ -13,6 +13,7 @@ export interface OperatorUser {
   clientId?: string
   permissions?: OperatorCapability[]
   obraId?: string
+  obraName?: string | null
 }
 
 const AuthContext = createContext<OperatorUser | null>(null)
@@ -83,6 +84,11 @@ export default function RecognizeLayout({ children }: { children: React.ReactNod
             <p className="font-bold text-sky-400 truncate text-lg leading-tight">
               {auth.fullName || auth.username}
             </p>
+            {auth.obraName && (
+              <p className="text-[11px] text-amber-400 mt-1.5 flex items-center gap-1">
+                🏗️ <span className="truncate">{auth.obraName}</span>
+              </p>
+            )}
           </div>
 
           <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
