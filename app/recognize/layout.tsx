@@ -58,7 +58,6 @@ export default function RecognizeLayout({ children }: { children: React.ReactNod
   }
 
   const nav = [
-    { href: '/recognize', label: 'Identificar', icon: '🧠', show: true },
     { href: '/recognize/employees', label: 'Funcionários', icon: '🧑‍💼', show: hasPerm(auth, 'employees.view') },
     { href: '/recognize/obras', label: 'Obras', icon: '🏗️', show: hasPerm(auth, 'obras.view') },
   ].filter((i) => i.show)
@@ -94,7 +93,7 @@ export default function RecognizeLayout({ children }: { children: React.ReactNod
 
           <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
             {nav.map((item) => {
-              const active = pathname === item.href || (item.href !== '/recognize' && pathname.startsWith(item.href))
+              const active = pathname === item.href || pathname.startsWith(item.href)
               return (
                 <Link
                   key={item.href}
