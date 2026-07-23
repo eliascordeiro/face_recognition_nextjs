@@ -49,8 +49,14 @@ export async function POST(request: NextRequest) {
   try {
     await initDb()
     const auth = await getAuthUser()
-    if (!auth || auth.role !== 'client') {
+    if (!auth || !auth.clientId) {
+      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
+    }
+    if (!hasCapability(auth, 'obras.manage')) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    }
+    if (auth.role === 'operator' && auth.obraId) {
+      return NextResponse.json({ error: 'Acesso negado — operador vinculado não pode criar novas obras' }, { status: 403 })
     }
 
     const body = await request.json()
@@ -81,7 +87,7 @@ export async function POST(request: NextRequest) {
         cep, street, number, neighborhood, city, state, address,
         typeof lat === 'number' && isFinite(lat) ? lat : null,
         typeof lng === 'number' && isFinite(lng) ? lng : null,
-        auth.sub,
+        auth.clientId,
       ]
     )
     return NextResponse.json(rows[0], { status: 201 })

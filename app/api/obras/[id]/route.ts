@@ -53,11 +53,17 @@ export async function PATCH(
   try {
     await initDb()
     const auth = await getAuthUser()
-    if (!auth || auth.role !== 'client') {
+    if (!auth || !auth.clientId) {
+      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
+    }
+    if (!hasCapability(auth, 'obras.manage')) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
 
     const { id } = await params
+    if (auth.role === 'operator' && auth.obraId && auth.obraId !== id) {
+      return NextResponse.json({ error: 'Acesso negado — fora do escopo da sua obra' }, { status: 403 })
+    }
     const body = await request.json()
     const { name, description, status, startDate, lat, lng } = body
 
@@ -89,7 +95,7 @@ export async function PATCH(
         typeof lat === 'number' && isFinite(lat) ? lat : null,
         typeof lng === 'number' && isFinite(lng) ? lng : null,
         Number(id),
-        auth.sub,
+        auth.clientId,
       ]
     )
     if (rowCount === 0) return NextResponse.json({ error: 'Obra não encontrada' }, { status: 404 })
@@ -107,14 +113,20 @@ export async function DELETE(
   try {
     await initDb()
     const auth = await getAuthUser()
-    if (!auth || auth.role !== 'client') {
+    if (!auth || !auth.clientId) {
+      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
+    }
+    if (!hasCapability(auth, 'obras.manage')) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
 
     const { id } = await params
+    if (auth.role === 'operator' && auth.obraId && auth.obraId !== id) {
+      return NextResponse.json({ error: 'Acesso negado — fora do escopo da sua obra' }, { status: 403 })
+    }
     const { rowCount } = await pool.query(
       `DELETE FROM obras WHERE id = $1 AND client_id = $2`,
-      [Number(id), auth.sub]
+      [Number(id), auth.clientId]
     )
     if (rowCount === 0) return NextResponse.json({ error: 'Obra não encontrada' }, { status: 404 })
     return new NextResponse(null, { status: 204 })

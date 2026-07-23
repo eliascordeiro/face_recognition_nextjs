@@ -1,7 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { OBRA_STATUS } from '@/components/obras/ObraFormModal'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useOperatorAuth, hasPerm } from '../layout'
+import ObraFormModal, { ObraFormData, OBRA_STATUS } from '@/components/obras/ObraFormModal'
+import ObraEmployeesModal from '@/components/obras/ObraEmployeesModal'
 
 interface Obra {
   id: number
@@ -9,6 +11,12 @@ interface Obra {
   description: string | null
   status: string
   start_date: string | null
+  cep: string | null
+  street: string | null
+  number: string | null
+  neighborhood: string | null
+  city: string | null
+  state: string | null
   address: string | null
   lat: number | null
   lng: number | null
@@ -16,27 +24,91 @@ interface Obra {
   created_at: string
 }
 
-/** Visualização somente leitura das obras — operadores nunca podem criar,
- *  editar ou remover obras (capacidade 'obras.manage' não é liberável). */
+type Modal =
+  | { kind: 'form'; obra?: Obra }
+  | { kind: 'employees'; obra: Obra }
+  | null
+
 export default function OperatorObrasPage() {
+  const auth = useOperatorAuth()
+  const canManage = hasPerm(auth, 'obras.manage')
+  const canManageEmployees = hasPerm(auth, 'employees.manage')
+
   const [obras, setObras] = useState<Obra[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [modal, setModal] = useState<Modal>(null)
 
-  useEffect(() => {
+  const load = useCallback(async () => {
+    setLoading(true)
     fetch('/api/obras').then(async (res) => {
       if (res.ok) setObras(await res.json())
       setLoading(false)
     })
   }, [])
 
+  useEffect(() => { load() }, [load])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return obras
+    return obras.filter((o) =>
+      o.name.toLowerCase().includes(q) || (o.address ?? '').toLowerCase().includes(q)
+    )
+  }, [obras, search])
+
+  function handleCreated(obra: Obra) {
+    setObras((prev) => [obra, ...prev])
+    setModal(null)
+  }
+
+  function handleUpdated(obra: Obra) {
+    setObras((prev) => prev.map((o) => (o.id === obra.id ? { ...o, ...obra } : o)))
+    setModal(null)
+  }
+
+  function handleEmployeeCountChange(obraId: number, delta: number) {
+    setObras((prev) => prev.map((o) => (o.id === obraId ? { ...o, employee_count: Math.max(0, o.employee_count + delta) } : o)))
+  }
+
+  async function handleDelete(id: number, name: string) {
+    if (!confirm(`Remover a obra "${name}"? Funcionários alocados serão desvinculados.`)) return
+    const res = await fetch(`/api/obras/${id}`, { method: 'DELETE' })
+    if (res.ok) setObras((prev) => prev.filter((o) => o.id !== id))
+  }
+
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-100">🏗️ Obras</h1>
-        <p className="text-slate-400 text-sm mt-0.5">
-          {obras.length} obra{obras.length !== 1 ? 's' : ''} · somente leitura
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100">🏗️ Obras</h1>
+          <p className="text-slate-400 text-sm mt-0.5">
+            {obras.length} obra{obras.length !== 1 ? 's' : ''}
+            {!canManage && <span> · somente leitura</span>}
+            {auth?.obraId && <span className="text-amber-400"> · restrito à obra {auth.obraName ?? ''}</span>}
+          </p>
+        </div>
+        {canManage && (
+          <button
+            onClick={() => setModal({ kind: 'form' })}
+            className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-sm font-medium transition-colors shadow shadow-sky-900/40"
+          >
+            + Nova obra
+          </button>
+        )}
       </div>
+
+      {obras.length > 0 && (
+        <div className="mb-5">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome ou endereço…"
+            className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-sky-500"
+          />
+        </div>
+      )}
 
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -47,11 +119,25 @@ export default function OperatorObrasPage() {
       ) : obras.length === 0 ? (
         <div className="text-center py-16 bg-slate-800/50 border border-dashed border-slate-700 rounded-xl">
           <p className="text-4xl mb-3">🏗️</p>
-          <p className="text-slate-300 font-medium">Nenhuma obra disponível para você.</p>
+          <p className="text-slate-300 font-medium">Nenhuma obra cadastrada ainda</p>
+          {canManage ? (
+            <button
+              onClick={() => setModal({ kind: 'form' })}
+              className="mt-5 px-5 py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-sm font-medium"
+            >
+              + Cadastrar primeira obra
+            </button>
+          ) : (
+            <p className="text-slate-500 text-sm mt-2">Nenhuma obra disponível para você.</p>
+          )}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-12 text-slate-500 text-sm">
+          Nenhuma obra encontrada para &ldquo;{search}&rdquo;.
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {obras.map((o) => {
+          {filtered.map((o) => {
             const st = OBRA_STATUS[o.status] ?? OBRA_STATUS.planning
             return (
               <div key={o.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4">
@@ -77,10 +163,69 @@ export default function OperatorObrasPage() {
                 <div className="mt-3 pt-3 border-t border-slate-700/70 text-xs text-slate-400">
                   👷 {o.employee_count} funcionário{o.employee_count !== 1 ? 's' : ''} alocado{o.employee_count !== 1 ? 's' : ''}
                 </div>
+
+                {canManageEmployees && (
+                  <button
+                    onClick={() => setModal({ kind: 'employees', obra: o })}
+                    className="mt-3 w-full flex items-center justify-between px-3 py-2 bg-slate-900/60 hover:bg-slate-900 border border-slate-700 rounded-lg text-sm transition-colors"
+                  >
+                    <span className="text-slate-300">👷 Funcionários alocados</span>
+                    <span className="bg-sky-600 text-white text-xs font-semibold px-2 py-0.5 rounded-full">
+                      {o.employee_count}
+                    </span>
+                  </button>
+                )}
+
+                {canManage && (
+                  <div className="flex gap-2 mt-3 pt-3 border-t border-slate-700/70">
+                    <button
+                      onClick={() => setModal({ kind: 'form', obra: o })}
+                      className="flex-1 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium"
+                    >
+                      ✏️ Editar
+                    </button>
+                    <button
+                      onClick={() => handleDelete(o.id, o.name)}
+                      className="flex-1 py-1.5 bg-red-900/30 hover:bg-red-900/60 text-red-300 rounded-lg text-xs font-medium"
+                    >
+                      🗑️ Remover
+                    </button>
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
+      )}
+
+      {modal?.kind === 'form' && canManage && (
+        <ObraFormModal
+          initial={modal.obra ? {
+            id: modal.obra.id,
+            name: modal.obra.name,
+            description: modal.obra.description ?? '',
+            status: modal.obra.status,
+            startDate: modal.obra.start_date ?? '',
+            cep: modal.obra.cep ?? '',
+            street: modal.obra.street ?? '',
+            number: modal.obra.number ?? '',
+            neighborhood: modal.obra.neighborhood ?? '',
+            city: modal.obra.city ?? '',
+            state: modal.obra.state ?? '',
+            lat: modal.obra.lat != null ? String(modal.obra.lat) : '',
+            lng: modal.obra.lng != null ? String(modal.obra.lng) : '',
+          } as ObraFormData : undefined}
+          onClose={() => setModal(null)}
+          onSaved={(data) => (modal.obra ? handleUpdated({ ...modal.obra, ...data }) : handleCreated({ ...data, employee_count: 0 }))}
+        />
+      )}
+      {modal?.kind === 'employees' && canManageEmployees && (
+        <ObraEmployeesModal
+          obraId={modal.obra.id}
+          obraName={modal.obra.name}
+          onClose={() => setModal(null)}
+          onChanged={(delta) => handleEmployeeCountChange(modal.obra.id, delta)}
+        />
       )}
     </div>
   )

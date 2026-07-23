@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { OperatorCapability } from '@/lib/permissions'
+import { OperatorCapability, hasCapability } from '@/lib/permissions'
 
 export interface OperatorUser {
   id: string
@@ -24,7 +24,8 @@ export function useOperatorAuth(): OperatorUser | null {
 }
 
 export function hasPerm(auth: OperatorUser | null, cap: OperatorCapability): boolean {
-  return !!auth?.permissions?.includes(cap)
+  if (!auth) return false
+  return hasCapability(auth, cap)
 }
 
 export default function RecognizeLayout({ children }: { children: React.ReactNode }) {
