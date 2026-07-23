@@ -33,5 +33,7 @@ export async function GET() {
     role: user.role,
     clientId: user.clientId,
     fullName: user.fullName,
+    permissions: user.permissions,
+    obraId: user.obraId,
   })
 }

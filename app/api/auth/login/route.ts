@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     }
 
     const { rows } = await pool.query(
-      'SELECT id, username, password, role, full_name, client_id FROM users WHERE username = $1',
+      'SELECT id, username, password, role, full_name, client_id, permissions, obra_id FROM users WHERE username = $1',
       [username]
     )
 
@@ -41,6 +41,8 @@ export async function POST(request: Request) {
       role: user.role,
       clientId,
       fullName: user.full_name ?? undefined,
+      permissions: user.role === 'operator' ? (user.permissions ?? []) : undefined,
+      obraId: user.role === 'operator' && user.obra_id != null ? String(user.obra_id) : undefined,
     })
 
     const response = NextResponse.json({
@@ -49,6 +51,8 @@ export async function POST(request: Request) {
       role: user.role,
       fullName: user.full_name,
       clientId,
+      permissions: user.role === 'operator' ? (user.permissions ?? []) : undefined,
+      obraId: user.role === 'operator' && user.obra_id != null ? String(user.obra_id) : undefined,
     })
     response.cookies.set(COOKIE_NAME, token, COOKIE_OPTIONS)
     return response

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
+import { sanitizePermissions } from '@/lib/permissions'
 
 // DELETE /api/users/[id]
 // admin  → remove cliente
@@ -57,6 +58,23 @@ export async function PATCH(
     const { id: idStr } = await params
     const id = Number(idStr)
     const body = await request.json()
+
+    // ── Atualização de permissões/escopo de um operador (feita pelo cliente) ──
+    if ('permissions' in body || 'obraId' in body) {
+      if (auth.role !== 'client') {
+        return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+      }
+      const cleanPermissions = sanitizePermissions(body.permissions)
+      const cleanObraId = typeof body.obraId === 'number' && Number.isFinite(body.obraId) ? body.obraId : null
+      const { rows, rowCount } = await pool.query(
+        `UPDATE users SET permissions = $1, obra_id = $2
+         WHERE id = $3 AND client_id = $4 AND role = 'operator'
+         RETURNING id, username, full_name, role, created_at, permissions, obra_id`,
+        [cleanPermissions, cleanObraId, id, auth.sub]
+      )
+      if (rowCount === 0) return NextResponse.json({ error: 'Operador não encontrado' }, { status: 404 })
+      return NextResponse.json(rows[0])
+    }
 
     // ── Atualização de perfil (cliente editando o próprio perfil) ──────────
     if ('fullName' in body || 'phone' in body || 'address' in body || 'lat' in body) {

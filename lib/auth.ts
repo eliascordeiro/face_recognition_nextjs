@@ -11,6 +11,8 @@ export interface JwtPayload {
   role: 'admin' | 'client' | 'operator'
   clientId?: string  // client's own id (role=client) or parent client id (role=operator)
   fullName?: string  // display name
+  permissions?: string[] // capacidades liberadas (só relevante para role=operator)
+  obraId?: string    // escopo opcional do operador a uma única obra
 }
 
 export async function signToken(payload: JwtPayload): Promise<string> {

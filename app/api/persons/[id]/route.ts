@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
+import { hasCapability } from '@/lib/permissions'
 
 function parseEmbedding(raw: unknown): number[] {
   if (!Array.isArray(raw) || raw.length !== 128) throw new Error('embedding deve ser um array de 128 números')
@@ -11,6 +12,9 @@ function parseEmbedding(raw: unknown): number[] {
 // ── PATCH /api/persons/[id] ───────────────────────────────────────────────────
 // Atualiza dados cadastrais e/ou vincula o reconhecimento facial (embedding)
 // depois do cadastro inicial — usado pelo modal "Reconhecimento facial".
+// Dados cadastrais exigem 'employees.manage'; embedding/thumbnail exigem
+// 'employees.face' (podem ser liberadas independentemente para o operador).
+// Operador vinculado a uma obra só pode editar funcionários dessa obra.
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -27,6 +31,19 @@ export async function PATCH(
     if (isNaN(id)) return NextResponse.json({ error: 'ID inválido' }, { status: 400 })
 
     const body = await request.json()
+
+    const touchesProfile = ['name', 'phone', 'email', 'document', 'role', 'active', 'obraId'].some((k) => k in body)
+    if (touchesProfile && !hasCapability(auth, 'employees.manage')) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    }
+    if (body.embedding != null && !hasCapability(auth, 'employees.face')) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    }
+    // Operador com escopo de obra não pode realocar funcionários para fora dela
+    if (auth.role === 'operator' && auth.obraId && 'obraId' in body) {
+      return NextResponse.json({ error: 'Acesso negado — fora do escopo da sua obra' }, { status: 403 })
+    }
+
     const fields: string[] = []
     const values: unknown[] = []
     let i = 1
@@ -72,9 +89,14 @@ export async function PATCH(
     }
 
     values.push(id, auth.clientId)
+    let scopeClause = ''
+    if (auth.role === 'operator' && auth.obraId) {
+      values.push(Number(auth.obraId))
+      scopeClause = ` AND obra_id = $${values.length}`
+    }
     const { rows } = await pool.query(
       `UPDATE persons SET ${fields.join(', ')}
-       WHERE id = $${i++} AND client_id = $${i++}
+       WHERE id = $${i++} AND client_id = $${i++}${scopeClause}
        RETURNING id, name, phone, email, document, role, active, thumbnail, created_at, obra_id, (embedding IS NOT NULL) AS has_face`,
       values
     )
@@ -99,6 +121,9 @@ export async function DELETE(
     if (!auth || !auth.clientId) {
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
     }
+    if (!hasCapability(auth, 'employees.manage')) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    }
 
     const { id: idStr } = await params
     const id = parseInt(idStr, 10)
@@ -106,10 +131,17 @@ export async function DELETE(
       return NextResponse.json({ error: 'ID inválido' }, { status: 400 })
     }
 
-    // Only delete persons belonging to this client
+    // Only delete persons belonging to this client (e, se operador com
+    // escopo de obra, apenas dentro da obra dele)
+    const values: (number | string)[] = [id, auth.clientId]
+    let scopeClause = ''
+    if (auth.role === 'operator' && auth.obraId) {
+      values.push(Number(auth.obraId))
+      scopeClause = ' AND obra_id = $3'
+    }
     const result = await pool.query(
-      'DELETE FROM persons WHERE id = $1 AND client_id = $2 RETURNING id',
-      [id, auth.clientId]
+      `DELETE FROM persons WHERE id = $1 AND client_id = $2${scopeClause} RETURNING id`,
+      values
     )
     if (result.rowCount === 0) {
       return NextResponse.json({ error: 'Funcionário não encontrado' }, { status: 404 })

@@ -30,6 +30,9 @@ export async function initDb(): Promise<void> {
     // Migrations idempotentes para instalações existentes
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)`)
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id) ON DELETE CASCADE`)
+    // Permissões granulares do operador (ex.: 'employees.view', 'obras.view')
+    // e escopo opcional a uma única obra — ver lib/permissions.ts.
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions TEXT[] NOT NULL DEFAULT '{}'`)
 
     // Cria admin padrão se nenhum admin existir
     const { rows: admins } = await client.query(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`)
@@ -99,6 +102,10 @@ export async function initDb(): Promise<void> {
 
     // Vincula funcionários (persons) a uma obra específica
     await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL`)
+
+    // Escopo opcional do operador a uma única obra (ex.: apontador de campo
+    // que só deve ver/atuar nos funcionários daquela obra específica).
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL`)
 
     await client.query(`
       CREATE INDEX IF NOT EXISTS persons_embedding_hnsw_idx

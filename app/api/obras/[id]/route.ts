@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
 import { composeAddress, cleanCep, cleanStr, cleanState } from '@/lib/address'
+import { hasCapability } from '@/lib/permissions'
 
 const VALID_STATUS = ['planning', 'in_progress', 'paused', 'completed']
 
@@ -14,8 +15,16 @@ export async function GET(
     await initDb()
     const auth = await getAuthUser()
     if (!auth || !auth.clientId) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
+    if (!hasCapability(auth, 'obras.view')) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    }
 
     const { id } = await params
+    // Operador vinculado a uma obra só pode ver a própria
+    if (auth.role === 'operator' && auth.obraId && auth.obraId !== id) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    }
+
     const { rows } = await pool.query(
       `SELECT id, name, description, status, start_date,
               cep, street, number, neighborhood, city, state,

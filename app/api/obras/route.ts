@@ -2,15 +2,29 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
 import { composeAddress, cleanCep, cleanStr, cleanState } from '@/lib/address'
+import { hasCapability } from '@/lib/permissions'
 
 const VALID_STATUS = ['planning', 'in_progress', 'paused', 'completed']
 
 // GET /api/obras — lista obras do cliente autenticado (com contagem de funcionários alocados)
+// Operadores só veem a lista com a capacidade 'obras.view' (somente leitura —
+// criar/editar/remover obra continua exclusivo do cliente). Se o operador
+// estiver vinculado a uma obra específica, só enxerga essa obra.
 export async function GET() {
   try {
     await initDb()
     const auth = await getAuthUser()
     if (!auth || !auth.clientId) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
+    if (!hasCapability(auth, 'obras.view')) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    }
+
+    const params: (string | number)[] = [auth.clientId]
+    let scopeClause = ''
+    if (auth.role === 'operator' && auth.obraId) {
+      params.push(Number(auth.obraId))
+      scopeClause = ` AND o.id = $${params.length}`
+    }
 
     const { rows } = await pool.query(
       `SELECT o.id, o.name, o.description, o.status, o.start_date,
@@ -19,10 +33,10 @@ export async function GET() {
               COUNT(p.id)::int AS employee_count
        FROM obras o
        LEFT JOIN persons p ON p.obra_id = o.id
-       WHERE o.client_id = $1
+       WHERE o.client_id = $1${scopeClause}
        GROUP BY o.id
        ORDER BY o.created_at DESC`,
-      [auth.clientId]
+      params
     )
     return NextResponse.json(rows)
   } catch {
