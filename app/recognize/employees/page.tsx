@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useOperatorAuth, hasPerm } from '../layout'
 import EmployeeFormModal from '@/components/employees/EmployeeFormModal'
 import FaceCaptureModal from '@/components/employees/FaceCaptureModal'
+import RecognizeTestModal from '@/components/employees/RecognizeTestModal'
 
 interface Employee {
   id: number
@@ -22,6 +23,7 @@ interface Employee {
 type Modal =
   | { kind: 'form'; employee?: Employee }
   | { kind: 'face'; employee: Employee }
+  | { kind: 'recognize' }
   | null
 
 function initials(name: string) {
@@ -50,7 +52,9 @@ export default function OperatorEmployeesPage() {
     const q = search.trim().toLowerCase()
     if (!q) return employees
     return employees.filter((e) =>
-      e.name.toLowerCase().includes(q) || (e.role ?? '').toLowerCase().includes(q)
+      e.name.toLowerCase().includes(q) ||
+      (e.role ?? '').toLowerCase().includes(q) ||
+      (e.email ?? '').toLowerCase().includes(q)
     )
   }, [employees, search])
 
@@ -85,14 +89,22 @@ export default function OperatorEmployeesPage() {
             )}
           </p>
         </div>
-        {canManage && (
+        <div className="flex gap-2">
           <button
-            onClick={() => setModal({ kind: 'form' })}
-            className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-sm font-medium"
+            onClick={() => setModal({ kind: 'recognize' })}
+            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded-lg text-sm font-medium transition-colors"
           >
-            + Novo funcionário
+            🔍 Testar identificação
           </button>
-        )}
+          {canManage && (
+            <button
+              onClick={() => setModal({ kind: 'form' })}
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-sm font-medium"
+            >
+              + Novo funcionário
+            </button>
+          )}
+        </div>
       </div>
 
       {employees.length > 0 && (
@@ -101,7 +113,7 @@ export default function OperatorEmployeesPage() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome ou cargo…"
+            placeholder="Buscar por nome, cargo ou e-mail…"
             className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-sky-500"
           />
         </div>
@@ -199,6 +211,9 @@ export default function OperatorEmployeesPage() {
           onClose={() => setModal(null)}
           onSaved={(patch) => handleFaceSaved(modal.employee.id, patch)}
         />
+      )}
+      {modal?.kind === 'recognize' && (
+        <RecognizeTestModal onClose={() => setModal(null)} />
       )}
     </div>
   )
