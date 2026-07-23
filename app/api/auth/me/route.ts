@@ -17,6 +17,7 @@ export async function GET() {
     return NextResponse.json({
       id: user.sub,
       username: user.username,
+      email: user.email ?? null,
       role: user.role,
       clientId: user.clientId,
       fullName: user.fullName,
@@ -34,6 +35,7 @@ export async function GET() {
     return NextResponse.json({
       id: user.sub,
       username: user.username,
+      email: user.email ?? null,
       role: user.role,
       clientId: user.clientId,
       fullName: user.fullName,
@@ -46,6 +48,7 @@ export async function GET() {
   return NextResponse.json({
     id: user.sub,
     username: user.username,
+    email: user.email ?? null,
     role: user.role,
     clientId: user.clientId,
     fullName: user.fullName,

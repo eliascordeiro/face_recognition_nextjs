@@ -20,7 +20,12 @@ export async function initDb(): Promise<void> {
       CREATE TABLE IF NOT EXISTS users (
         id         SERIAL PRIMARY KEY,
         username   VARCHAR(100) UNIQUE NOT NULL,
+        email      VARCHAR(255) UNIQUE,
         password   VARCHAR(255) NOT NULL,
+        auth_provider VARCHAR(20) NOT NULL DEFAULT 'local',
+        google_sub VARCHAR(255) UNIQUE,
+        reset_password_token_hash VARCHAR(255),
+        reset_password_expires_at TIMESTAMP WITH TIME ZONE,
         role       VARCHAR(20)  NOT NULL DEFAULT 'operator',
         full_name  VARCHAR(255),
         client_id  INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -30,6 +35,16 @@ export async function initDb(): Promise<void> {
     // Migrations idempotentes para instalações existentes
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)`)
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255)`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(20) NOT NULL DEFAULT 'local'`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub VARCHAR(255)`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_token_hash VARCHAR(255)`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_expires_at TIMESTAMP WITH TIME ZONE`)
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users (LOWER(email)) WHERE email IS NOT NULL`)
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_unique_idx ON users (google_sub) WHERE google_sub IS NOT NULL`)
+    // Migração de compatibilidade: em bases antigas, contas já criadas com
+    // username em formato de e-mail passam a ter esse e-mail normalizado.
+    await client.query(`UPDATE users SET email = LOWER(username) WHERE email IS NULL AND username LIKE '%@%'`)
     // Permissões granulares do operador (ex.: 'employees.view', 'obras.view')
     // e escopo opcional a uma única obra — ver lib/permissions.ts.
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions TEXT[] NOT NULL DEFAULT '{}'`)

@@ -7,7 +7,7 @@ import { useClientAuth } from './layout'
 interface Stats {
   obras: number
   employees: number
-  operators: number
+  users: number
 }
 
 export default function ClientDashboard() {
@@ -24,7 +24,7 @@ export default function ClientDashboard() {
       setStats({
         obras: Array.isArray(obras) ? obras.length : 0,
         employees: Array.isArray(persons) ? persons.length : 0,
-        operators: Array.isArray(users) ? users.length : 0,
+        users: Array.isArray(users) ? users.length : 0,
       })
     })
   }, [])
@@ -32,7 +32,7 @@ export default function ClientDashboard() {
   const cards = [
     { icon: '🏗️', label: 'Obras',        value: stats?.obras,     href: '/client/obras',     color: 'sky' },
     { icon: '🧑‍💼', label: 'Funcionários', value: stats?.employees, href: '/client/employees', color: 'emerald' },
-    { icon: '👥', label: 'Operadores',    value: stats?.operators, href: '/client/operators', color: 'violet' },
+    { icon: '👥', label: 'Usuários',      value: stats?.users, href: '/client/operators', color: 'violet' },
   ]
 
   return (
@@ -96,8 +96,8 @@ export default function ClientDashboard() {
         >
           <span className="text-2xl">👥</span>
           <div>
-            <p className="font-medium text-slate-200 text-sm">Gerenciar Operadores</p>
-            <p className="text-xs text-slate-500">Crie e gerencie usuários operadores</p>
+            <p className="font-medium text-slate-200 text-sm">Gerenciar Usuários</p>
+            <p className="text-xs text-slate-500">Crie e gerencie usuários da sua equipe</p>
           </div>
         </button>
         <button

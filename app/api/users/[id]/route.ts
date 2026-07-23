@@ -69,7 +69,7 @@ export async function PATCH(
       const { rows, rowCount } = await pool.query(
         `UPDATE users SET permissions = $1, obra_id = $2
          WHERE id = $3 AND client_id = $4 AND role = 'operator'
-         RETURNING id, username, full_name, role, created_at, permissions, obra_id`,
+         RETURNING id, username, email, full_name, role, created_at, permissions, obra_id`,
         [cleanPermissions, cleanObraId, id, auth.sub]
       )
       if (rowCount === 0) return NextResponse.json({ error: 'Operador não encontrado' }, { status: 404 })

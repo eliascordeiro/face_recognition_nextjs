@@ -7,6 +7,7 @@ import { OPERATOR_CAPABILITIES, CAPABILITY_LABELS, OperatorCapability } from '@/
 interface Operator {
   id: number
   username: string
+  email?: string | null
   full_name: string | null
   role: string
   created_at: string
@@ -29,7 +30,7 @@ export default function OperatorsPage() {
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState<ModalMode>(null)
   const [selectedOp, setSelectedOp] = useState<Operator | null>(null)
-  const [formData, setFormData] = useState({ username: '', password: '', fullName: '' })
+  const [formData, setFormData] = useState({ email: '', password: '', fullName: '' })
   const [permForm, setPermForm] = useState<{ permissions: OperatorCapability[]; obraId: number | null }>({ permissions: [], obraId: null })
   const [formError, setFormError] = useState<string | null>(null)
   const [formLoading, setFormLoading] = useState(false)
@@ -60,7 +61,7 @@ export default function OperatorsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: formData.username,
+          email: formData.email,
           password: formData.password,
           fullName: formData.fullName,
           permissions: permForm.permissions,
@@ -71,7 +72,7 @@ export default function OperatorsPage() {
       if (!res.ok) { setFormError(data.error); return }
       setOperators((prev) => [...prev, data])
       setModal(null)
-      setFormData({ username: '', password: '', fullName: '' })
+      setFormData({ email: '', password: '', fullName: '' })
       setPermForm({ permissions: [], obraId: null })
     } finally {
       setFormLoading(false)
@@ -92,14 +93,14 @@ export default function OperatorsPage() {
       const data = await res.json()
       if (!res.ok) { setFormError(data.error); return }
       setModal(null)
-      setFormData({ username: '', password: '', fullName: '' })
+      setFormData({ email: '', password: '', fullName: '' })
     } finally {
       setFormLoading(false)
     }
   }
 
   function openCreate() {
-    setFormData({ username: '', password: '', fullName: '' })
+    setFormData({ email: '', password: '', fullName: '' })
     setPermForm({ permissions: [], obraId: null })
     setFormError(null)
     setModal('create')
@@ -107,7 +108,7 @@ export default function OperatorsPage() {
 
   function openPassword(op: Operator) {
     setSelectedOp(op)
-    setFormData({ username: op.username, password: '', fullName: op.full_name ?? '' })
+    setFormData({ email: op.email ?? op.username, password: '', fullName: op.full_name ?? '' })
     setFormError(null)
     setModal('password')
   }
@@ -152,10 +153,10 @@ export default function OperatorsPage() {
     <div className="p-6 max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">👥 Operadores</h1>
+          <h1 className="text-2xl font-bold text-slate-100">👥 Usuários</h1>
           {auth && (
             <p className="text-slate-400 text-sm mt-0.5">
-              {auth.fullName || auth.username} · {operators.length} operador{operators.length !== 1 ? 'es' : ''}
+              {auth.fullName || auth.username} · {operators.length} usuário{operators.length !== 1 ? 's' : ''}
             </p>
           )}
         </div>
@@ -163,7 +164,7 @@ export default function OperatorsPage() {
           onClick={openCreate}
           className="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
-          + Novo operador
+          + Novo usuário
         </button>
       </div>
 
@@ -175,7 +176,7 @@ export default function OperatorsPage() {
             <thead className="bg-slate-700/50 text-slate-300">
               <tr>
                 <th className="text-left px-4 py-3">Nome</th>
-                <th className="text-left px-4 py-3">Login</th>
+                <th className="text-left px-4 py-3">E-mail</th>
                 <th className="text-left px-4 py-3">Acesso</th>
                 <th className="text-left px-4 py-3">Criado em</th>
                 <th className="px-4 py-3"></th>
@@ -192,7 +193,7 @@ export default function OperatorsPage() {
               {operators.map((op) => (
                 <tr key={op.id} className="hover:bg-slate-700/30 transition-colors">
                   <td className="px-4 py-3 font-medium">{op.full_name || '—'}</td>
-                  <td className="px-4 py-3 text-slate-400">{op.username}</td>
+                  <td className="px-4 py-3 text-slate-400">{op.email ?? op.username}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1 max-w-xs">
                       {(op.permissions ?? []).length === 0 ? (
@@ -243,7 +244,7 @@ export default function OperatorsPage() {
       {modal === 'create' && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold mb-4">Novo operador</h3>
+            <h3 className="text-lg font-semibold mb-4">Novo usuário</h3>
             <form onSubmit={handleCreateOperator} className="space-y-3">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Nome (opcional)</label>
@@ -256,14 +257,14 @@ export default function OperatorsPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Login *</label>
+                <label className="block text-xs text-slate-400 mb-1">E-mail *</label>
                 <input
-                  type="text"
-                  value={formData.username}
-                  onChange={(e) => setFormData((d) => ({ ...d, username: e.target.value }))}
-                  placeholder="usuario"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData((d) => ({ ...d, email: e.target.value }))}
+                  placeholder="usuario@empresa.com"
                   required
-                  autoComplete="off"
+                  autoComplete="email"
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
                 />
               </div>
@@ -281,7 +282,7 @@ export default function OperatorsPage() {
 
               <div className="pt-2 border-t border-slate-700/70">
                 <p className="text-xs text-slate-400 mt-3 mb-2">
-                  👁️ Identificar rosto sempre liberado. Marque o que mais esse operador pode fazer:
+                  👁️ Identificar rosto sempre liberado. Marque o que mais esse usuário pode fazer:
                 </p>
                 <div className="space-y-2">
                   {OPERATOR_CAPABILITIES.map((cap) => (
@@ -379,7 +380,7 @@ export default function OperatorsPage() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-1">🔑 Permissões</h3>
-            <p className="text-slate-400 text-sm mb-4">{selectedOp.full_name || selectedOp.username}</p>
+            <p className="text-slate-400 text-sm mb-4">{selectedOp.full_name || selectedOp.email || selectedOp.username}</p>
             <form onSubmit={handleSavePermissions} className="space-y-4">
               <div>
                 <p className="text-xs text-slate-400 mb-2">

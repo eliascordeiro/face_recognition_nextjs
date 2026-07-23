@@ -8,6 +8,7 @@ const JWT_SECRET = new TextEncoder().encode(
 export interface JwtPayload {
   sub: string        // user id
   username: string
+  email?: string
   role: 'admin' | 'client' | 'operator'
   clientId?: string  // client's own id (role=client) or parent client id (role=operator)
   fullName?: string  // display name

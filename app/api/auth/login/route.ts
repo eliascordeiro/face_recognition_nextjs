@@ -2,19 +2,25 @@ import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import pool, { initDb } from '@/lib/db'
 import { signToken, COOKIE_NAME, COOKIE_OPTIONS } from '@/lib/auth'
+import { normalizeEmail } from '@/lib/security'
 
 export async function POST(request: Request) {
   try {
     await initDb()
-    const { username, password } = await request.json()
+    const { email, password } = await request.json()
 
-    if (!username || !password) {
-      return NextResponse.json({ error: 'Usuário e senha obrigatórios' }, { status: 400 })
+    if (!email || !password) {
+      return NextResponse.json({ error: 'E-mail e senha são obrigatórios' }, { status: 400 })
     }
 
+    const identifier = normalizeEmail(String(email))
+
     const { rows } = await pool.query(
-      'SELECT id, username, password, role, full_name, client_id, permissions, obra_id FROM users WHERE username = $1',
-      [username]
+      `SELECT id, username, email, password, role, full_name, client_id, permissions, obra_id
+       FROM users
+       WHERE LOWER(email) = LOWER($1) OR username = $1
+       LIMIT 1`,
+      [identifier]
     )
 
     if (rows.length === 0) {
@@ -38,6 +44,7 @@ export async function POST(request: Request) {
     const token = await signToken({
       sub: String(user.id),
       username: user.username,
+      email: user.email ?? undefined,
       role: user.role,
       clientId,
       fullName: user.full_name ?? undefined,
@@ -48,6 +55,7 @@ export async function POST(request: Request) {
     const response = NextResponse.json({
       id: user.id,
       username: user.username,
+      email: user.email,
       role: user.role,
       fullName: user.full_name,
       clientId,

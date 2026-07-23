@@ -6,13 +6,25 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET ?? 'change-this-secret-in-production'
 )
 
-const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/health']
+const PUBLIC_PATHS = [
+  '/login',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/google',
+  '/api/auth/forgot-password',
+  '/api/auth/reset-password',
+  '/api/health',
+]
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Deixa passar rotas públicas e assets
   if (
+    pathname === '/' ||
     PUBLIC_PATHS.some((p) => pathname.startsWith(p)) ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/models') ||
