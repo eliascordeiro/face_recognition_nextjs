@@ -19,10 +19,10 @@ export interface ObraFormData {
 }
 
 export const OBRA_STATUS: Record<string, { label: string; classes: string; dot: string }> = {
-  planning:    { label: 'Planejamento',  classes: 'bg-slate-700/60 border-slate-600 text-slate-300',   dot: 'bg-slate-400' },
-  in_progress: { label: 'Em andamento',  classes: 'bg-sky-900/40 border-sky-700 text-sky-300',          dot: 'bg-sky-400' },
-  paused:      { label: 'Pausada',       classes: 'bg-amber-900/40 border-amber-700 text-amber-300',    dot: 'bg-amber-400' },
-  completed:   { label: 'Concluída',     classes: 'bg-emerald-900/40 border-emerald-700 text-emerald-300', dot: 'bg-emerald-400' },
+  planning: { label: 'Planejamento', classes: 'bg-slate-700/60 border-slate-600 text-slate-300', dot: 'bg-slate-400' },
+  in_progress: { label: 'Em andamento', classes: 'bg-sky-900/40 border-sky-700 text-sky-300', dot: 'bg-sky-400' },
+  paused: { label: 'Pausada', classes: 'bg-amber-900/40 border-amber-700 text-amber-300', dot: 'bg-amber-400' },
+  completed: { label: 'Concluída', classes: 'bg-emerald-900/40 border-emerald-700 text-emerald-300', dot: 'bg-emerald-400' },
 }
 
 const UF_LIST = [
@@ -36,9 +36,9 @@ const emptyForm: ObraFormData = {
   lat: '', lng: '',
 }
 
-function formatCep(v: string) {
-  const d = v.replace(/\D/g, '').slice(0, 8)
-  return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d
+function formatCep(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 8)
+  return digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits
 }
 
 interface Props {
@@ -61,33 +61,21 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
 
   function applySuggestion() {
     if (!suggestion) return
-    setForm((f) => ({ ...f, lat: suggestion.lat, lng: suggestion.lng }))
+    setForm((current) => ({ ...current, lat: suggestion.lat, lng: suggestion.lng }))
     setSuggestion(null)
   }
 
-  // Enquanto o usuário completa rua/número/bairro/cidade/UF manualmente,
-  // busca (com debounce) as coordenadas do endereço para dar um retorno
-  // visual de onde a obra está localizada — sem precisar estar no local.
-  //
-  // Importante: só substitui a coordenada automaticamente quando o resultado
-  // é de alta confiança (rua/número encontrados). Resultados aproximados
-  // (nível de CEP/cidade) NUNCA sobrescrevem uma coordenada já definida
-  // (ex.: capturada por GPS no local) — ficam disponíveis como sugestão,
-  // que o usuário aplica manualmente se quiser.
   useEffect(() => {
-    // Não dispara na primeira renderização (edição já vem com dados prontos)
     if (skipNextAutoGeo.current) {
       skipNextAutoGeo.current = false
       return
     }
-    // Dispara assim que houver rua + (CEP ou cidade/UF) — não é preciso
-    // esperar o campo Cidade ser confirmado quando o CEP já foi informado,
-    // já que o CEP sozinho localiza bem a região. Isso permite buscar as
-    // coordenadas logo após CEP + Número/Rua serem preenchidos.
+
     const cepDigits = form.cep.replace(/\D/g, '')
     const hasEnoughInfo =
       form.street.trim().length >= 3 &&
       (cepDigits.length === 8 || (form.city.trim().length >= 2 && form.state.length === 2))
+
     if (!hasEnoughInfo) {
       setSuggestion(null)
       return
@@ -110,11 +98,8 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
         if (!res.ok || !data.lat || !data.lng) return
 
         if (data.precision === 'street') {
-          // Alta confiança: rua E número exatos encontrados — aplica direto
-          setForm((f) => ({ ...f, lat: String(data.lat), lng: String(data.lng) }))
+          setForm((current) => ({ ...current, lat: String(data.lat), lng: String(data.lng) }))
         } else {
-          // Baixa confiança (número aproximado/interpolado, só CEP/cidade, ou
-          // busca livre): sugere, mas não sobrescreve a coordenada sozinho
           setSuggestion({
             lat: String(data.lat),
             lng: String(data.lng),
@@ -123,69 +108,41 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
           })
         }
       } catch {
-        // Falha silenciosa — usuário pode capturar via GPS
+        // Falha silenciosa
       } finally {
         setGeoPreviewLoading(false)
       }
     }, 900)
 
     return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.street, form.number, form.neighborhood, form.city, form.state, form.cep])
 
   async function lookupCep(rawCep: string) {
     const digits = rawCep.replace(/\D/g, '')
     if (digits.length !== 8) return
+
     setCepLoading(true)
     setAutoNote(null)
     try {
       const res = await fetch(`/api/geocode/cep?cep=${digits}`)
       const data = await res.json()
-      if (!res.ok) { setError(data.error || 'CEP não encontrado'); return }
-      setForm((f) => ({
-        ...f,
-        street: data.street || f.street,
-        neighborhood: data.neighborhood || f.neighborhood,
-        city: data.city || f.city,
-        state: data.state || f.state,
+      if (!res.ok) {
+        setError(data.error || 'CEP não encontrado')
+        return
+      }
+
+      setForm((current) => ({
+        ...current,
+        street: data.street || current.street,
+        neighborhood: data.neighborhood || current.neighborhood,
+        city: data.city || current.city,
+        state: data.state || current.state,
       }))
-      setAutoNote('📮 Endereço preenchido a partir do CEP — confira o número e complemente se necessário.')
+      setAutoNote('📮 Endereço preenchido a partir do CEP. Revise e complemente os dados manuais se necessário.')
     } catch {
       setError('Falha ao consultar o CEP.')
     } finally {
       setCepLoading(false)
-    }
-  }
-
-  async function reverseGeocode(lat: number, lng: number) {
-    try {
-      const res = await fetch(`/api/geocode/reverse?lat=${lat}&lng=${lng}`)
-      const data = await res.json()
-      if (res.ok && data.raw) {
-        const previousNumber = form.number
-        setForm((f) => ({
-          ...f,
-          cep: data.raw.postcode ? formatCep(data.raw.postcode) : f.cep,
-          street: data.raw.street || f.street,
-          number: data.raw.houseNumber || f.number,
-          neighborhood: data.raw.neighbourhood || f.neighborhood,
-          city: data.raw.city || f.city,
-          state: data.raw.state ? data.raw.state.slice(0, 2).toUpperCase() : f.state,
-        }))
-        // O GPS localiza o ponto exato, mas o NÚMERO só vem certo se o
-        // OpenStreetMap tiver esse endereço mapeado com número de porta —
-        // caso contrário (comum em rodovias/áreas rurais), mantemos o que
-        // o usuário já tinha digitado e avisamos, em vez de apagar/adivinhar.
-        setAutoNote(
-          data.precision === 'house'
-            ? '📍 Endereço completo (incluindo número) confirmado pelo GPS.'
-            : previousNumber
-              ? `📍 Localização confirmada pelo GPS — o OpenStreetMap não tem o número mapeado nesta rua, mantido o número ${previousNumber} que você informou.`
-              : '📍 Localização confirmada pelo GPS — o OpenStreetMap não tem o número mapeado nesta rua; informe o número manualmente.'
-        )
-      }
-    } catch {
-      // Falha silenciosa: usuário pode digitar o endereço manualmente
     }
   }
 
@@ -194,22 +151,20 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
       setError('GPS não disponível neste dispositivo.')
       return
     }
+
     setGpsLoading(true)
     setAutoNote(null)
-    setSuggestion(null)
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = pos.coords.latitude
-        const lng = pos.coords.longitude
-        // Evita que o preview automático (debounce) sobrescreva com uma
-        // coordenada menos precisa logo após o GPS preencher os campos.
+      (position) => {
+        const lat = position.coords.latitude
+        const lng = position.coords.longitude
         skipNextAutoGeo.current = true
-        setForm((f) => ({ ...f, lat: lat.toFixed(8), lng: lng.toFixed(8) }))
-        await reverseGeocode(lat, lng)
+        setForm((current) => ({ ...current, lat: lat.toFixed(8), lng: lng.toFixed(8) }))
+        setAutoNote('📍 Coordenadas capturadas com sucesso. O endereço manual não foi alterado.')
         setGpsLoading(false)
       },
-      (err) => {
-        setError(`GPS: ${err.message}`)
+      (geoError) => {
+        setError(`GPS: ${geoError.message}`)
         setGpsLoading(false)
       },
       { enableHighAccuracy: true, timeout: 10000 }
@@ -219,10 +174,12 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+
     if (form.name.trim().length < 2) {
       setError('Informe o nome da obra.')
       return
     }
+
     setLoading(true)
     try {
       const payload = {
@@ -239,13 +196,17 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
         lat: form.lat ? parseFloat(form.lat) : null,
         lng: form.lng ? parseFloat(form.lng) : null,
       }
+
       const res = await fetch(isEdit ? `/api/obras/${initial!.id}` : '/api/obras', {
         method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
       const data = await res.json()
-      if (!res.ok) { setError(data.error || 'Erro ao salvar'); return }
+      if (!res.ok) {
+        setError(data.error || 'Erro ao salvar')
+        return
+      }
       onSaved(data)
     } finally {
       setLoading(false)
@@ -274,7 +235,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
             <input
               type="text"
               value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))}
               placeholder="Ex: Residencial Parque Norte"
               required
               autoFocus
@@ -286,7 +247,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
             <label className="block text-xs text-slate-400 mb-1">Descrição</label>
             <textarea
               value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              onChange={(e) => setForm((current) => ({ ...current, description: e.target.value }))}
               placeholder="Detalhes principais da obra…"
               rows={3}
               className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500 resize-none"
@@ -298,11 +259,11 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
               <label className="block text-xs text-slate-400 mb-1">Status</label>
               <select
                 value={form.status}
-                onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
+                onChange={(e) => setForm((current) => ({ ...current, status: e.target.value }))}
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
               >
-                {Object.entries(OBRA_STATUS).map(([key, v]) => (
-                  <option key={key} value={key}>{v.label}</option>
+                {Object.entries(OBRA_STATUS).map(([key, status]) => (
+                  <option key={key} value={key}>{status.label}</option>
                 ))}
               </select>
             </div>
@@ -311,24 +272,18 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
               <input
                 type="date"
                 value={form.startDate}
-                onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+                onChange={(e) => setForm((current) => ({ ...current, startDate: e.target.value }))}
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
               />
             </div>
           </div>
 
-          {/* ── Endereço estruturado ──────────────────────────────────── */}
           <div className="pt-1 border-t border-slate-700/70 mt-1">
-            <div className="flex items-center justify-between mt-3 mb-1">
-              <label className="text-xs text-slate-400">Endereço</label>
-              <button
-                type="button"
-                onClick={captureGPS}
-                disabled={gpsLoading}
-                className="text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50"
-              >
-                {gpsLoading ? '⏳ Obtendo localização…' : '📡 Capturar GPS'}
-              </button>
+            <div className="mt-3 mb-3">
+              <label className="text-xs text-slate-400">Endereço manual</label>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Preencha CEP, número e demais campos manualmente. O GPS não altera estes dados.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -338,7 +293,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
                   <input
                     type="text"
                     value={form.cep}
-                    onChange={(e) => setForm((f) => ({ ...f, cep: formatCep(e.target.value) }))}
+                    onChange={(e) => setForm((current) => ({ ...current, cep: formatCep(e.target.value) }))}
                     onBlur={(e) => lookupCep(e.target.value)}
                     placeholder="00000-000"
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm font-mono focus:outline-none focus:border-sky-500"
@@ -353,7 +308,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
                 <input
                   type="text"
                   value={form.number}
-                  onChange={(e) => setForm((f) => ({ ...f, number: e.target.value }))}
+                  onChange={(e) => setForm((current) => ({ ...current, number: e.target.value }))}
                   placeholder="123"
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
                 />
@@ -365,7 +320,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
               <input
                 type="text"
                 value={form.street}
-                onChange={(e) => setForm((f) => ({ ...f, street: e.target.value }))}
+                onChange={(e) => setForm((current) => ({ ...current, street: e.target.value }))}
                 placeholder="Rua das Flores"
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
               />
@@ -377,7 +332,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
                 <input
                   type="text"
                   value={form.neighborhood}
-                  onChange={(e) => setForm((f) => ({ ...f, neighborhood: e.target.value }))}
+                  onChange={(e) => setForm((current) => ({ ...current, neighborhood: e.target.value }))}
                   placeholder="Centro"
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
                 />
@@ -386,7 +341,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
                 <label className="block text-[11px] text-slate-500 mb-1">UF</label>
                 <select
                   value={form.state}
-                  onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
+                  onChange={(e) => setForm((current) => ({ ...current, state: e.target.value }))}
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
                 >
                   <option value="">--</option>
@@ -402,17 +357,12 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
               <input
                 type="text"
                 value={form.city}
-                onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+                onChange={(e) => setForm((current) => ({ ...current, city: e.target.value }))}
                 placeholder="São Paulo"
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
               />
             </div>
 
-            {autoNote && (
-              <p className="text-[11px] text-emerald-400 mt-2">{autoNote}</p>
-            )}
-
-            {/* Preview de coordenadas — atualiza conforme o endereço é preenchido */}
             <div className="mt-3 px-3 py-2 bg-slate-900/60 border border-slate-700 rounded-lg flex items-center justify-between gap-2">
               <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
                 <span>🛰️</span>
@@ -423,62 +373,109 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
                     {Number(form.lat).toFixed(6)}, {Number(form.lng).toFixed(6)}
                   </span>
                 ) : (
-                  <span>Complete o endereço ou capture o GPS para ver as coordenadas</span>
+                  <span>Complete o endereço para sugerir coordenadas</span>
                 )}
               </div>
-              {form.lat && form.lng && !geoPreviewLoading && (
-                <a
-                  href={`https://maps.google.com/?q=${form.lat},${form.lng}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[11px] text-sky-500 hover:text-sky-400 whitespace-nowrap"
-                >
-                  ↗ Ver no mapa
-                </a>
-              )}
             </div>
 
-            {/* Sugestão de baixa confiança (não encontrou a rua/número exatos) —
-                não substitui a coordenada atual sozinha; usuário decide. */}
             {suggestion && !geoPreviewLoading && (
               <div className="mt-2 px-3 py-2 bg-amber-900/20 border border-amber-800/60 rounded-lg flex items-center justify-between gap-2">
                 <div className="text-[11px] text-amber-300">
                   {suggestion.precision === 'street_approx' ? (
                     suggestion.matchedNumber ? (
                       <>
-                        ⚠️ O OpenStreetMap não tem o número <strong>{form.number}</strong> mapeado nesta
-                        rua — o ponto mais próximo encontrado é o número{' '}
-                        <strong>{suggestion.matchedNumber}</strong>:
+                        ⚠️ O endereço digitado encontrou um ponto aproximado. Número mais próximo mapeado: <strong>{suggestion.matchedNumber}</strong>.
                       </>
                     ) : (
                       <>
-                        ⚠️ O OpenStreetMap não tem números mapeados nesta rua — encontrado apenas
-                        um ponto aproximado ao longo dela (sem o número <strong>{form.number}</strong>):
+                        ⚠️ O endereço digitado encontrou apenas um ponto aproximado ao longo da rua.
                       </>
                     )
                   ) : (
                     <>
-                      ⚠️ Rua não localizada com exatidão — encontrada apenas uma coordenada
-                      aproximada {suggestion.precision === 'cep' ? 'da região do CEP/cidade' : 'da busca pelo endereço'}:
+                      ⚠️ Foi encontrada apenas uma coordenada aproximada para o endereço informado.
                     </>
-                  )}
-                  {' '}
+                  )}{' '}
                   <span className="font-mono">{Number(suggestion.lat).toFixed(6)}, {Number(suggestion.lng).toFixed(6)}</span>.
-                  {' '}Prefira capturar o GPS no local para maior precisão.
                 </div>
                 <button
                   type="button"
                   onClick={applySuggestion}
                   className="text-[11px] px-2 py-1 bg-amber-700/60 hover:bg-amber-700 rounded whitespace-nowrap"
                 >
-                  Usar assim mesmo
+                  Usar coordenada sugerida
                 </button>
               </div>
             )}
           </div>
 
-          {error && <p className="text-red-400 text-sm">{error}</p>}
+          <div className="pt-1 border-t border-slate-700/70 mt-1">
+            <div className="flex items-center justify-between mt-3 mb-3 gap-3">
+              <div>
+                <label className="text-xs text-slate-400">Coordenadas GPS</label>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Use apenas para capturar latitude e longitude, sem alterar os campos de endereço.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={captureGPS}
+                disabled={gpsLoading}
+                className="text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50 whitespace-nowrap"
+              >
+                {gpsLoading ? '⏳ Obtendo localização…' : '📡 Capturar GPS'}
+              </button>
+            </div>
 
+            {autoNote && <p className="text-[11px] text-emerald-400 mt-2">{autoNote}</p>}
+
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-1">Latitude</label>
+                <input
+                  type="text"
+                  value={form.lat}
+                  onChange={(e) => setForm((current) => ({ ...current, lat: e.target.value }))}
+                  placeholder="-25.648160"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm font-mono focus:outline-none focus:border-sky-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-1">Longitude</label>
+                <input
+                  type="text"
+                  value={form.lng}
+                  onChange={(e) => setForm((current) => ({ ...current, lng: e.target.value }))}
+                  placeholder="-49.477396"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm font-mono focus:outline-none focus:border-sky-500"
+                />
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500 mt-2">
+              Capture o GPS no local ou informe as coordenadas manualmente.
+            </p>
+
+            {(form.lat || form.lng) && (
+              <div className="mt-3 px-3 py-2 bg-slate-900/60 border border-slate-700 rounded-lg flex items-center justify-between gap-2">
+                <p className="text-[11px] text-slate-400 font-mono truncate">
+                  🗺️ {form.lat || '—'}, {form.lng || '—'}
+                </p>
+                {form.lat && form.lng && (
+                  <a
+                    href={`https://maps.google.com/?q=${encodeURIComponent(`${form.lat},${form.lng}`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] text-sky-400 hover:text-sky-300 whitespace-nowrap"
+                  >
+                    ↗ Ver no mapa
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
+
+          {error && <p className="text-red-400 text-sm">{error}</p>}
 
           <div className="flex gap-2 pt-2">
             <button
