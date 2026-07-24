@@ -24,6 +24,21 @@ interface Obra {
   created_at: string
 }
 
+function normalizeDateForInput(value: string | null | undefined) {
+  if (!value) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toISOString().slice(0, 10)
+}
+
+function formatStartDate(value: string | null | undefined) {
+  if (!value) return ''
+  const normalized = normalizeDateForInput(value)
+  if (!normalized) return ''
+  return new Date(`${normalized}T00:00:00`).toLocaleDateString('pt-BR')
+}
+
 type Modal =
   | { kind: 'form'; obra?: Obra }
   | { kind: 'employees'; obra: Obra }
@@ -167,9 +182,7 @@ export default function ObrasPage() {
                       </a>
                     </p>
                   )}
-                  {o.start_date && (
-                    <p>🗓️ Início: {new Date(o.start_date + 'T00:00:00').toLocaleDateString('pt-BR')}</p>
-                  )}
+                  {o.start_date && <p>🗓️ Início: {formatStartDate(o.start_date)}</p>}
                 </div>
 
                 <button
@@ -210,7 +223,7 @@ export default function ObrasPage() {
             name: modal.obra.name,
             description: modal.obra.description ?? '',
             status: modal.obra.status,
-            startDate: modal.obra.start_date ?? '',
+            startDate: normalizeDateForInput(modal.obra.start_date),
             cep: modal.obra.cep ?? '',
             street: modal.obra.street ?? '',
             number: modal.obra.number ?? '',
