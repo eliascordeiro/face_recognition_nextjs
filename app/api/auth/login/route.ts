@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const identifier = normalizeEmail(String(email))
 
     const { rows } = await pool.query(
-      `SELECT id, username, email, password, role, full_name, client_id, permissions, obra_id
+      `SELECT id, username, email, password, role, full_name, client_id, permissions, obra_id, email_verified_at
        FROM users
        WHERE LOWER(email) = LOWER($1) OR username = $1
        LIMIT 1`,
@@ -31,6 +31,17 @@ export async function POST(request: Request) {
     const valid = await bcrypt.compare(password, user.password)
     if (!valid) {
       return NextResponse.json({ error: 'Credenciais inválidas' }, { status: 401 })
+    }
+
+    if (user.role === 'client' && user.email && !user.email_verified_at) {
+      return NextResponse.json(
+        {
+          error: 'Confirme o código enviado para seu e-mail antes de entrar.',
+          code: 'email_not_verified',
+          email: user.email,
+        },
+        { status: 403 }
+      )
     }
 
     // clientId: for clients = own id; for operators = their parent client id

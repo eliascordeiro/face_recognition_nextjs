@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import pool, { initDb } from '@/lib/db'
-import { signToken, COOKIE_NAME, COOKIE_OPTIONS } from '@/lib/auth'
 import { isValidEmail, normalizeEmail } from '@/lib/security'
+import {
+  createEmailVerificationCode,
+  createEmailVerificationCodeHash,
+  EMAIL_VERIFICATION_EXPIRES_MINUTES,
+  sendEmailVerificationCode,
+} from '@/lib/emailVerification'
 
 export async function POST(request: Request) {
   try {
@@ -28,44 +33,81 @@ export async function POST(request: Request) {
     }
 
     const exists = await pool.query(
-      `SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      `SELECT id, role, full_name, email_verified_at
+       FROM users
+       WHERE LOWER(email) = LOWER($1)
+       LIMIT 1`,
       [email]
     )
-    if (exists.rowCount) {
-      return NextResponse.json({ error: 'Já existe uma conta com este e-mail' }, { status: 409 })
-    }
 
     const hash = await bcrypt.hash(password, 10)
     const username = email
+    const displayName = companyName || fullName
 
-    const created = await pool.query(
-      `INSERT INTO users (username, email, password, role, full_name, auth_provider)
-       VALUES ($1, $2, $3, 'client', $4, 'local')
-       RETURNING id, username, email, role, full_name`,
-      [username, email, hash, companyName || fullName]
+    let userId: number
+    let recipientName: string | null = displayName
+
+    if (exists.rowCount) {
+      const existing = exists.rows[0]
+      if (existing.email_verified_at) {
+        return NextResponse.json({ error: 'Já existe uma conta com este e-mail' }, { status: 409 })
+      }
+      if (existing.role !== 'client') {
+        return NextResponse.json({ error: 'Este e-mail já está vinculado a outro tipo de conta' }, { status: 409 })
+      }
+
+      const updated = await pool.query(
+        `UPDATE users
+         SET username = $1,
+             password = $2,
+             role = 'client',
+             full_name = $3,
+             auth_provider = 'local',
+             google_sub = NULL,
+             email_verified_at = NULL
+         WHERE id = $4
+         RETURNING id, full_name`,
+        [username, hash, displayName, existing.id]
+      )
+      userId = updated.rows[0].id
+      recipientName = updated.rows[0].full_name ?? displayName
+    } else {
+      const created = await pool.query(
+        `INSERT INTO users (username, email, password, role, full_name, auth_provider, email_verified_at)
+         VALUES ($1, $2, $3, 'client', $4, 'local', NULL)
+         RETURNING id, full_name`,
+        [username, email, hash, displayName]
+      )
+
+      userId = created.rows[0].id
+      recipientName = created.rows[0].full_name ?? displayName
+    }
+
+    const code = createEmailVerificationCode()
+    const codeHash = createEmailVerificationCodeHash(code)
+
+    await pool.query(
+      `UPDATE users
+       SET email_verification_code_hash = $1,
+           email_verification_expires_at = NOW() + ($2::text || ' minutes')::interval,
+           email_verification_attempts = 0,
+           email_verification_last_sent_at = NOW()
+       WHERE id = $3`,
+      [codeHash, String(EMAIL_VERIFICATION_EXPIRES_MINUTES), userId]
     )
 
-    const user = created.rows[0]
-    const token = await signToken({
-      sub: String(user.id),
-      username: user.username,
-      email: user.email,
-      role: user.role,
-      clientId: String(user.id),
-      fullName: user.full_name ?? undefined,
+    await sendEmailVerificationCode({
+      to: email,
+      recipientName,
+      code,
     })
 
-    const response = NextResponse.json({
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      role: user.role,
-      clientId: String(user.id),
-      fullName: user.full_name,
+    return NextResponse.json({
+      ok: true,
+      requiresVerification: true,
+      email,
+      message: 'Enviamos um código de verificação para o seu e-mail.',
     }, { status: 201 })
-
-    response.cookies.set(COOKIE_NAME, token, COOKIE_OPTIONS)
-    return response
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Erro interno'
     if (msg.includes('unique') || msg.includes('duplicate')) {

@@ -26,6 +26,11 @@ export async function initDb(): Promise<void> {
         google_sub VARCHAR(255) UNIQUE,
         reset_password_token_hash VARCHAR(255),
         reset_password_expires_at TIMESTAMP WITH TIME ZONE,
+        email_verified_at TIMESTAMP WITH TIME ZONE,
+        email_verification_code_hash VARCHAR(255),
+        email_verification_expires_at TIMESTAMP WITH TIME ZONE,
+        email_verification_attempts INTEGER NOT NULL DEFAULT 0,
+        email_verification_last_sent_at TIMESTAMP WITH TIME ZONE,
         role       VARCHAR(20)  NOT NULL DEFAULT 'operator',
         full_name  VARCHAR(255),
         client_id  INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -40,11 +45,25 @@ export async function initDb(): Promise<void> {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub VARCHAR(255)`)
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_token_hash VARCHAR(255)`)
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_expires_at TIMESTAMP WITH TIME ZONE`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP WITH TIME ZONE`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_code_hash VARCHAR(255)`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMP WITH TIME ZONE`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_attempts INTEGER NOT NULL DEFAULT 0`)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_last_sent_at TIMESTAMP WITH TIME ZONE`)
     await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users (LOWER(email)) WHERE email IS NOT NULL`)
     await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_unique_idx ON users (google_sub) WHERE google_sub IS NOT NULL`)
     // Migração de compatibilidade: em bases antigas, contas já criadas com
     // username em formato de e-mail passam a ter esse e-mail normalizado.
     await client.query(`UPDATE users SET email = LOWER(username) WHERE email IS NULL AND username LIKE '%@%'`)
+    // Marca clientes já existentes como verificados para não bloquear acesso
+    // após ativar o fluxo de validação por código no cadastro.
+    await client.query(`
+      UPDATE users
+      SET email_verified_at = COALESCE(email_verified_at, created_at)
+      WHERE role = 'client'
+        AND email IS NOT NULL
+        AND email_verified_at IS NULL
+    `)
     // Permissões granulares do operador (ex.: 'employees.view', 'obras.view')
     // e escopo opcional a uma única obra — ver lib/permissions.ts.
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions TEXT[] NOT NULL DEFAULT '{}'`)

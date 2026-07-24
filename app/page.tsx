@@ -69,6 +69,7 @@ export default function Home() {
             <ul className="space-y-3 text-slate-300">
               <li>✅ Cadastro de cliente com acesso por e-mail</li>
               <li>✅ Login com e-mail e senha</li>
+              <li>✅ Verificação por código no e-mail no primeiro cadastro</li>
               <li>✅ Recuperação de senha por e-mail</li>
               <li>✅ Gestão de usuários com permissões por obra</li>
               <li>✅ Reconhecimento facial integrado ao fluxo operacional</li>
