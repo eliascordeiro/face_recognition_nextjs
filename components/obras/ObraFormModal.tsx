@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useEffect, useRef, useState } from 'react'
+import { FormEvent, useState } from 'react'
 
 export interface ObraFormData {
   id?: number
@@ -54,75 +54,12 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
   const [loading, setLoading] = useState(false)
   const [gpsLoading, setGpsLoading] = useState(false)
   const [cepLoading, setCepLoading] = useState(false)
-  const [autoNote, setAutoNote] = useState<string | null>(null)
-  const [geoPreviewLoading, setGeoPreviewLoading] = useState(false)
-  const [suggestion, setSuggestion] = useState<{ lat: string; lng: string; precision: 'street_approx' | 'cep' | 'free'; matchedNumber?: string | null } | null>(null)
-  const skipNextAutoGeo = useRef(true)
-
-  function applySuggestion() {
-    if (!suggestion) return
-    setForm((current) => ({ ...current, lat: suggestion.lat, lng: suggestion.lng }))
-    setSuggestion(null)
-  }
-
-  useEffect(() => {
-    if (skipNextAutoGeo.current) {
-      skipNextAutoGeo.current = false
-      return
-    }
-
-    const cepDigits = form.cep.replace(/\D/g, '')
-    const hasEnoughInfo =
-      form.street.trim().length >= 3 &&
-      (cepDigits.length === 8 || (form.city.trim().length >= 2 && form.state.length === 2))
-
-    if (!hasEnoughInfo) {
-      setSuggestion(null)
-      return
-    }
-
-    const timer = setTimeout(async () => {
-      const params = new URLSearchParams({
-        street: form.street,
-        number: form.number,
-        city: form.city,
-        state: form.state,
-      })
-      if (cepDigits.length === 8) params.set('cep', cepDigits)
-
-      setGeoPreviewLoading(true)
-      setSuggestion(null)
-      try {
-        const res = await fetch(`/api/geocode/forward?${params.toString()}`)
-        const data = await res.json()
-        if (!res.ok || !data.lat || !data.lng) return
-
-        if (data.precision === 'street') {
-          setForm((current) => ({ ...current, lat: String(data.lat), lng: String(data.lng) }))
-        } else {
-          setSuggestion({
-            lat: String(data.lat),
-            lng: String(data.lng),
-            precision: data.precision,
-            matchedNumber: data.matchedNumber,
-          })
-        }
-      } catch {
-        // Falha silenciosa
-      } finally {
-        setGeoPreviewLoading(false)
-      }
-    }, 900)
-
-    return () => clearTimeout(timer)
-  }, [form.street, form.number, form.neighborhood, form.city, form.state, form.cep])
 
   async function lookupCep(rawCep: string) {
     const digits = rawCep.replace(/\D/g, '')
     if (digits.length !== 8) return
 
     setCepLoading(true)
-    setAutoNote(null)
     try {
       const res = await fetch(`/api/geocode/cep?cep=${digits}`)
       const data = await res.json()
@@ -138,7 +75,6 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
         city: data.city || current.city,
         state: data.state || current.state,
       }))
-      setAutoNote('📮 Endereço preenchido a partir do CEP. Revise e complemente os dados manuais se necessário.')
     } catch {
       setError('Falha ao consultar o CEP.')
     } finally {
@@ -153,14 +89,11 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
     }
 
     setGpsLoading(true)
-    setAutoNote(null)
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const lat = position.coords.latitude
         const lng = position.coords.longitude
-        skipNextAutoGeo.current = true
         setForm((current) => ({ ...current, lat: lat.toFixed(8), lng: lng.toFixed(8) }))
-        setAutoNote('📍 Coordenadas capturadas com sucesso. O endereço manual não foi alterado.')
         setGpsLoading(false)
       },
       (geoError) => {
@@ -359,110 +292,55 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
               />
             </div>
-
-            <div className="mt-3 px-3 py-2 bg-slate-900/60 border border-slate-700 rounded-lg flex items-center justify-between gap-2">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                <span>🛰️</span>
-                {geoPreviewLoading ? (
-                  <span className="text-sky-400 animate-pulse">Localizando coordenadas…</span>
-                ) : form.lat && form.lng ? (
-                  <span className="font-mono text-slate-300">
-                    {Number(form.lat).toFixed(6)}, {Number(form.lng).toFixed(6)}
-                  </span>
-                ) : (
-                  <span>Complete o endereço para sugerir coordenadas</span>
-                )}
-              </div>
-            </div>
-
-            {suggestion && !geoPreviewLoading && (
-              <div className="mt-2 px-3 py-2 bg-amber-900/20 border border-amber-800/60 rounded-lg flex items-center justify-between gap-2">
-                <div className="text-[11px] text-amber-300">
-                  {suggestion.precision === 'street_approx' ? (
-                    suggestion.matchedNumber ? (
-                      <>
-                        ⚠️ O endereço digitado encontrou um ponto aproximado. Número mais próximo mapeado: <strong>{suggestion.matchedNumber}</strong>.
-                      </>
-                    ) : (
-                      <>
-                        ⚠️ O endereço digitado encontrou apenas um ponto aproximado ao longo da rua.
-                      </>
-                    )
-                  ) : (
-                    <>
-                      ⚠️ Foi encontrada apenas uma coordenada aproximada para o endereço informado.
-                    </>
-                  )}{' '}
-                  <span className="font-mono">{Number(suggestion.lat).toFixed(6)}, {Number(suggestion.lng).toFixed(6)}</span>.
-                </div>
-                <button
-                  type="button"
-                  onClick={applySuggestion}
-                  className="text-[11px] px-2 py-1 bg-amber-700/60 hover:bg-amber-700 rounded whitespace-nowrap"
-                >
-                  Usar coordenada sugerida
-                </button>
-              </div>
-            )}
           </div>
 
           <div className="pt-1 border-t border-slate-700/70 mt-1">
-            <div className="flex items-center justify-end mt-3 mb-3 gap-3">
+            <div className="flex items-center justify-between mt-3 mb-2 gap-3">
+              <label className="text-xs text-slate-400">Localização GPS</label>
               <button
                 type="button"
                 onClick={captureGPS}
                 disabled={gpsLoading}
                 className="text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50 whitespace-nowrap"
               >
-                {gpsLoading ? '⏳ Obtendo localização…' : '📡 Capturar GPS'}
+                {gpsLoading ? '⏳ Obtendo…' : '📡 Capturar GPS'}
               </button>
             </div>
 
-            {autoNote && <p className="text-[11px] text-emerald-400 mt-2">{autoNote}</p>}
-
-            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Latitude</label>
                 <input
-                  type="text"
+                  type="number"
+                  step="any"
                   value={form.lat}
                   onChange={(e) => setForm((current) => ({ ...current, lat: e.target.value }))}
-                  placeholder="-25.648160"
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm font-mono focus:outline-none focus:border-sky-500"
+                  placeholder="-23.5505"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-xs font-mono focus:outline-none focus:border-sky-500"
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Longitude</label>
                 <input
-                  type="text"
+                  type="number"
+                  step="any"
                   value={form.lng}
                   onChange={(e) => setForm((current) => ({ ...current, lng: e.target.value }))}
-                  placeholder="-49.477396"
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm font-mono focus:outline-none focus:border-sky-500"
+                  placeholder="-46.6333"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-xs font-mono focus:outline-none focus:border-sky-500"
                 />
               </div>
             </div>
 
-            <p className="text-[11px] text-slate-500 mt-2">
-              Capture o GPS no local ou informe as coordenadas manualmente.
-            </p>
-
-            {(form.lat || form.lng) && (
-              <div className="mt-3 px-3 py-2 bg-slate-900/60 border border-slate-700 rounded-lg flex items-center justify-between gap-2">
-                <p className="text-[11px] text-slate-400 font-mono truncate">
-                  🗺️ {form.lat || '—'}, {form.lng || '—'}
-                </p>
-                {form.lat && form.lng && (
-                  <a
-                    href={`https://maps.google.com/?q=${encodeURIComponent(`${form.lat},${form.lng}`)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[11px] text-sky-400 hover:text-sky-300 whitespace-nowrap"
-                  >
-                    ↗ Ver no mapa
-                  </a>
-                )}
-              </div>
+            {form.lat && form.lng && (
+              <a
+                href={`https://maps.google.com/?q=${form.lat},${form.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-sky-500 hover:text-sky-400 mt-1 inline-block"
+              >
+                ↗ Verificar no Google Maps
+              </a>
             )}
           </div>
 
