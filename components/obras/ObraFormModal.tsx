@@ -280,10 +280,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
 
           <div className="pt-1 border-t border-slate-700/70 mt-1">
             <div className="mt-3 mb-3">
-              <label className="text-xs text-slate-400">Endereço manual</label>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Preencha CEP, número e demais campos manualmente. O GPS não altera estes dados.
-              </p>
+              <label className="text-xs text-slate-400">Endereço</label>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -410,13 +407,7 @@ export default function ObraFormModal({ initial, onClose, onSaved }: Props) {
           </div>
 
           <div className="pt-1 border-t border-slate-700/70 mt-1">
-            <div className="flex items-center justify-between mt-3 mb-3 gap-3">
-              <div>
-                <label className="text-xs text-slate-400">Coordenadas GPS</label>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Use apenas para capturar latitude e longitude, sem alterar os campos de endereço.
-                </p>
-              </div>
+            <div className="flex items-center justify-end mt-3 mb-3 gap-3">
               <button
                 type="button"
                 onClick={captureGPS}
