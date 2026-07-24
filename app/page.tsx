@@ -68,7 +68,7 @@ export default function Home() {
             <h2 className="font-[var(--font-display)] text-xl font-semibold mb-4">O que você ganha</h2>
             <ul className="space-y-3 text-slate-300">
               <li>✅ Cadastro de cliente com acesso por e-mail</li>
-              <li>✅ Login tradicional e login com Google</li>
+              <li>✅ Login com e-mail e senha</li>
               <li>✅ Recuperação de senha por e-mail</li>
               <li>✅ Gestão de usuários com permissões por obra</li>
               <li>✅ Reconhecimento facial integrado ao fluxo operacional</li>
