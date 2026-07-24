@@ -35,6 +35,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
+  const [googleScriptReady, setGoogleScriptReady] = useState(false)
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
 
   async function onGoogleCredential(credential: string) {
@@ -61,7 +62,7 @@ export default function LoginPage() {
   }
 
   useEffect(() => {
-    if (!googleClientId || !window.google) return
+    if (!googleClientId || !googleScriptReady || !window.google) return
     const button = document.getElementById('google-signin-button')
     if (!button) return
     button.innerHTML = ''
@@ -77,7 +78,7 @@ export default function LoginPage() {
       shape: 'pill',
       width: '280',
     })
-  }, [googleClientId])
+  }, [googleClientId, googleScriptReady])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -106,7 +107,12 @@ export default function LoginPage() {
   return (
     <div className="auth-shell">
       {googleClientId && (
-        <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
+        <Script
+          src="https://accounts.google.com/gsi/client"
+          strategy="afterInteractive"
+          onLoad={() => setGoogleScriptReady(true)}
+          onError={() => setError('Falha ao carregar login com Google')}
+        />
       )}
       <div className="w-full max-w-sm">
         <div className="text-center mb-7">
