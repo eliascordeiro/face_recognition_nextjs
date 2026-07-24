@@ -38,15 +38,15 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+    <div className="auth-shell">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
+        <div className="text-center mb-7">
           <div className="text-5xl mb-3">🏗️</div>
-          <h1 className="text-2xl font-bold text-white">Criar conta</h1>
-          <p className="text-slate-400 text-sm mt-1">Comece agora no Obras.com</p>
+          <h1 className="font-[var(--font-display)] text-3xl font-semibold text-white">Criar conta</h1>
+          <p className="text-slate-300 text-sm mt-1">Comece agora no Obras.com</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="auth-panel p-5 sm:p-6 space-y-4">
           <div>
             <label className="block text-sm text-slate-300 mb-1">Seu nome *</label>
             <input

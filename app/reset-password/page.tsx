@@ -57,10 +57,10 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-slate-800 border border-slate-700 rounded-2xl p-6">
-        <h1 className="text-xl font-bold text-white mb-1">Nova senha</h1>
-        <p className="text-sm text-slate-400 mb-5">Defina sua nova senha para continuar.</p>
+    <div className="auth-shell">
+      <div className="auth-panel p-5 sm:p-6">
+        <h1 className="font-[var(--font-display)] text-2xl font-semibold text-white mb-1">Nova senha</h1>
+        <p className="text-sm text-slate-300 mb-5">Defina sua nova senha para continuar.</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

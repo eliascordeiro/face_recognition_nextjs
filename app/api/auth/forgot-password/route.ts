@@ -35,7 +35,14 @@ export async function POST(request: Request) {
       [tokenHash, result.rows[0].id]
     )
 
-    const baseUrl = process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+    const requestUrl = new URL(request.url)
+    const forwardedHost = request.headers.get('x-forwarded-host')
+    const forwardedProto = request.headers.get('x-forwarded-proto')
+    const host = forwardedHost || request.headers.get('host')
+    const proto = forwardedProto || requestUrl.protocol.replace(':', '')
+    const inferredOrigin = host ? `${proto}://${host}` : requestUrl.origin
+
+    const baseUrl = process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? inferredOrigin ?? 'http://localhost:3000'
     const link = `${baseUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`
 
     const recipientName = result.rows[0].full_name ?? 'usuário'

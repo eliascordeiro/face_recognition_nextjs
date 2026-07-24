@@ -34,14 +34,14 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#1e293b_0%,_#0b1220_45%,_#020617_100%)] text-white">
+    <div className="app-shell text-white">
       <main className="max-w-6xl mx-auto px-6 py-16 sm:py-20">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           <section>
             <p className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.22em] text-sky-300/90 border border-sky-400/20 px-3 py-1 rounded-full mb-5">
               Plataforma Obras.com
             </p>
-            <h1 className="text-4xl sm:text-5xl font-black leading-tight">
+            <h1 className="font-[var(--font-display)] text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight">
               Controle de obras, equipes e acesso com biometria facial.
             </h1>
             <p className="text-slate-300 mt-5 text-lg max-w-xl">
@@ -64,8 +64,8 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 sm:p-8 backdrop-blur-sm">
-            <h2 className="text-xl font-bold mb-4">O que você ganha</h2>
+          <section className="elevated interactive-card rounded-2xl p-6 sm:p-8 backdrop-blur-sm">
+            <h2 className="font-[var(--font-display)] text-xl font-semibold mb-4">O que você ganha</h2>
             <ul className="space-y-3 text-slate-300">
               <li>✅ Cadastro de cliente com acesso por e-mail</li>
               <li>✅ Login tradicional e login com Google</li>

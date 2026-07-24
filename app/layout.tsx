@@ -1,18 +1,26 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Plus_Jakarta_Sans, Space_Grotesk } from 'next/font/google'
 import './globals.css'
 
-const inter = Inter({ subsets: ['latin'] })
+const plusJakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  variable: '--font-body',
+})
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  variable: '--font-display',
+})
 
 export const metadata: Metadata = {
-  title: 'Reconhecimento Facial',
-  description: 'face-api.js + Next.js + PostgreSQL/pgvector',
+  title: 'Obras.com',
+  description: 'Plataforma de gestão de obras, usuários e reconhecimento facial',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body className={inter.className}>{children}</body>
+      <body className={`${plusJakarta.variable} ${spaceGrotesk.variable} font-[var(--font-body)]`}>{children}</body>
     </html>
   )
 }

@@ -64,14 +64,14 @@ export default function RecognizeLayout({ children }: { children: React.ReactNod
 
   return (
     <AuthContext.Provider value={auth}>
-      <div className="min-h-screen bg-slate-900 text-white flex">
+      <div className="app-shell text-white flex">
         {open && (
           <div className="fixed inset-0 bg-black/50 z-20 lg:hidden" onClick={() => setOpen(false)} />
         )}
 
         <aside
           className={`
-            fixed top-0 left-0 h-full w-64 bg-slate-800 border-r border-slate-700
+            fixed top-0 left-0 h-full w-64 bg-slate-900/85 backdrop-blur-xl border-r border-slate-700/80
             z-30 flex flex-col transition-transform duration-200
             ${open ? 'translate-x-0' : '-translate-x-full'}
             lg:translate-x-0 lg:static lg:flex-shrink-0
@@ -122,7 +122,7 @@ export default function RecognizeLayout({ children }: { children: React.ReactNod
         </aside>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="lg:hidden sticky top-0 z-10 bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center gap-3">
+          <header className="lg:hidden sticky top-0 z-10 bg-slate-900/90 backdrop-blur-xl border-b border-slate-700/70 px-4 py-3 flex items-center gap-3">
             <button
               onClick={() => setOpen(true)}
               className="text-slate-300 hover:text-white text-xl leading-none"

@@ -150,8 +150,8 @@ export default function OperatorsPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">👥 Usuários</h1>
           {auth && (
@@ -172,7 +172,8 @@ export default function OperatorsPage() {
         <div className="text-center py-12 text-slate-400 animate-pulse">Carregando…</div>
       ) : (
         <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[780px] text-sm">
             <thead className="bg-slate-700/50 text-slate-300">
               <tr>
                 <th className="text-left px-4 py-3">Nome</th>
@@ -186,7 +187,7 @@ export default function OperatorsPage() {
               {operators.length === 0 && (
                 <tr>
                   <td colSpan={5} className="text-center text-slate-500 py-6">
-                    Nenhum operador cadastrado.
+                    Nenhum usuário cadastrado.
                   </td>
                 </tr>
               )}
@@ -237,10 +238,11 @@ export default function OperatorsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
-      {/* Modal: Criar operador */}
+      {/* Modal: Criar usuário */}
       {modal === 'create' && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
@@ -252,7 +254,7 @@ export default function OperatorsPage() {
                   type="text"
                   value={formData.fullName}
                   onChange={(e) => setFormData((d) => ({ ...d, fullName: e.target.value }))}
-                  placeholder="Nome do operador"
+                  placeholder="Nome do usuário"
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
                 />
               </div>

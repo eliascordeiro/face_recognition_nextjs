@@ -61,7 +61,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
   return (
     <AuthContext.Provider value={auth}>
-      <div className="min-h-screen bg-slate-900 text-white flex">
+      <div className="app-shell text-white flex">
 
         {/* Overlay mobile */}
         {open && (
@@ -74,7 +74,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         {/* ── Sidebar ─────────────────────────────────────────────────── */}
         <aside
           className={`
-            fixed top-0 left-0 h-full w-64 bg-slate-800 border-r border-slate-700
+            fixed top-0 left-0 h-full w-64 bg-slate-900/85 backdrop-blur-xl border-r border-slate-700/80
             z-30 flex flex-col transition-transform duration-200
             ${open ? 'translate-x-0' : '-translate-x-full'}
             lg:translate-x-0 lg:static lg:flex-shrink-0
@@ -130,7 +130,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         <div className="flex-1 flex flex-col min-w-0">
 
           {/* Header mobile */}
-          <header className="lg:hidden sticky top-0 z-10 bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center gap-3">
+          <header className="lg:hidden sticky top-0 z-10 bg-slate-900/90 backdrop-blur-xl border-b border-slate-700/70 px-4 py-3 flex items-center gap-3">
             <button
               onClick={() => setOpen(true)}
               className="text-slate-300 hover:text-white text-xl leading-none"

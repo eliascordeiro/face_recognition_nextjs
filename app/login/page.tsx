@@ -75,7 +75,7 @@ export default function LoginPage() {
       type: 'standard',
       text: 'signin_with',
       shape: 'pill',
-      width: '320',
+      width: '280',
     })
   }, [googleClientId])
 
@@ -104,20 +104,20 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+    <div className="auth-shell">
       {googleClientId && (
         <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
       )}
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
+        <div className="text-center mb-7">
           <div className="text-5xl mb-3">🔐</div>
-          <h1 className="text-2xl font-bold text-white">Acessar plataforma</h1>
-          <p className="text-slate-400 text-sm mt-1">Entre com seu e-mail para continuar</p>
+          <h1 className="font-[var(--font-display)] text-3xl font-semibold text-white">Acessar plataforma</h1>
+          <p className="text-slate-300 text-sm mt-1">Entre com seu e-mail para continuar</p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4"
+          className="auth-panel p-5 sm:p-6 space-y-4"
         >
           <div>
             <label className="block text-sm text-slate-300 mb-1" htmlFor="email">
@@ -164,7 +164,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-slate-600
+            className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-slate-600 soft-glow
                        text-white font-semibold py-2 rounded-lg transition-colors"
           >
             {loading ? 'Entrando…' : 'Entrar'}
