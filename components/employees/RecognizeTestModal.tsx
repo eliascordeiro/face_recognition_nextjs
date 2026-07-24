@@ -22,10 +22,29 @@ export default function RecognizeTestModal({ onClose }: Props) {
   const [modelsLoaded, setModelsLoaded] = useState(false)
   const [cameraOn, setCameraOn] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user')
+  const [canFlipCamera, setCanFlipCamera] = useState(false)
   const [status, setStatus] = useState<{ text: string; type: StatusType }>({
     text: 'Ligue a câmera e capture o rosto para identificar.',
     type: 'idle',
   })
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        if (!navigator.mediaDevices?.enumerateDevices) return
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        if (!cancelled) {
+          const videoInputs = devices.filter((d) => d.kind === 'videoinput').length
+          setCanFlipCamera(videoInputs > 1)
+        }
+      } catch {
+        if (!cancelled) setCanFlipCamera(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -46,10 +65,12 @@ export default function RecognizeTestModal({ onClose }: Props) {
     return () => { cancelled = true }
   }, [])
 
-  const startCamera = useCallback(async () => {
+  const startCamera = useCallback(async (facing: 'user' | 'environment' = facingMode) => {
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        video: { facingMode: facing, width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       })
       if (videoRef.current) {
@@ -58,10 +79,23 @@ export default function RecognizeTestModal({ onClose }: Props) {
         setCameraOn(true)
       }
     } catch (err: unknown) {
+      if (facing === 'environment') {
+        setFacingMode('user')
+        startCamera('user')
+        setStatus({ text: 'ℹ️ Câmera traseira indisponível neste dispositivo. Usando câmera frontal.', type: 'idle' })
+        return
+      }
       const msg = err instanceof Error ? err.message : 'Erro desconhecido'
       setStatus({ text: `Erro ao acessar câmera: ${msg}`, type: 'error' })
     }
-  }, [])
+  }, [facingMode])
+
+  const flipCamera = useCallback(() => {
+    if (!canFlipCamera) return
+    const next = facingMode === 'user' ? 'environment' : 'user'
+    setFacingMode(next)
+    if (cameraOn) startCamera(next)
+  }, [canFlipCamera, facingMode, cameraOn, startCamera])
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -143,7 +177,7 @@ export default function RecognizeTestModal({ onClose }: Props) {
           <div className="flex gap-2 mt-3">
             {!cameraOn ? (
               <button
-                onClick={startCamera}
+                onClick={() => startCamera()}
                 disabled={!modelsLoaded}
                 className="flex-1 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 rounded-lg text-sm font-semibold"
               >
@@ -157,6 +191,14 @@ export default function RecognizeTestModal({ onClose }: Props) {
                 ■ Desligar
               </button>
             )}
+            <button
+              onClick={flipCamera}
+              disabled={!modelsLoaded || !canFlipCamera}
+              className="py-2 px-3 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 rounded-lg text-sm font-semibold whitespace-nowrap"
+              title={canFlipCamera ? 'Alternar entre câmera frontal e traseira' : 'Dispositivo com apenas uma câmera'}
+            >
+              🔄 Girar
+            </button>
             <button
               onClick={captureAndIdentify}
               disabled={!cameraOn || processing || !modelsLoaded}
