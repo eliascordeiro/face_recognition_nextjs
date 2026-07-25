@@ -26,6 +26,7 @@ export function useClientAuth(): ClientUser | null {
 const NAV = [
   { href: '/client',           label: 'Painel',        icon: '🏠' },
   { href: '/client/obras',     label: 'Obras',         icon: '🏗️' },
+  { href: '/client/expenses',  label: 'Gastos',        icon: '💸' },
   { href: '/client/employees', label: 'Funcionários',  icon: '🧑‍💼' },
   { href: '/client/operators', label: 'Usuários',      icon: '👥' },
   { href: '/client/profile',   label: 'Meu Perfil',    icon: '⚙️' },

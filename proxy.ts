@@ -106,6 +106,12 @@ export async function proxy(request: NextRequest) {
       }
     }
 
+    if (pathname.startsWith('/api/expenses')) {
+      if (role !== 'client') {
+        return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+      }
+    }
+
     // ── API /api/persons e /api/recognize — client + operator only ──────
     if (pathname.startsWith('/api/persons') || pathname.startsWith('/api/recognize')) {
       if (role === 'admin' || role === 'employee') {

@@ -8,6 +8,7 @@ interface Stats {
   obras: number
   employees: number
   users: number
+  expenses: number
 }
 
 export default function ClientDashboard() {
@@ -20,17 +21,20 @@ export default function ClientDashboard() {
       fetch('/api/obras').then((r) => (r.ok ? r.json() : [])),
       fetch('/api/persons').then((r) => (r.ok ? r.json() : [])),
       fetch('/api/users').then((r) => (r.ok ? r.json() : [])),
-    ]).then(([obras, persons, users]) => {
+      fetch('/api/expenses').then((r) => (r.ok ? r.json() : [])),
+    ]).then(([obras, persons, users, expenses]) => {
       setStats({
         obras: Array.isArray(obras) ? obras.length : 0,
         employees: Array.isArray(persons) ? persons.length : 0,
         users: Array.isArray(users) ? users.length : 0,
+        expenses: Array.isArray(expenses) ? expenses.length : 0,
       })
     })
   }, [])
 
   const cards = [
     { icon: '🏗️', label: 'Obras',        value: stats?.obras,     href: '/client/obras',     color: 'sky' },
+    { icon: '💸', label: 'Gastos',       value: stats?.expenses,  href: '/client/expenses',  color: 'amber' },
     { icon: '🧑‍💼', label: 'Funcionários', value: stats?.employees, href: '/client/employees', color: 'emerald' },
     { icon: '👥', label: 'Usuários',      value: stats?.users, href: '/client/operators', color: 'violet' },
   ]
@@ -45,7 +49,7 @@ export default function ClientDashboard() {
       </p>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
         {cards.map((c) => (
           <button
             key={c.href}
@@ -78,6 +82,16 @@ export default function ClientDashboard() {
           <div>
             <p className="font-medium text-slate-200 text-sm">Gerenciar Obras</p>
             <p className="text-xs text-slate-500">Cadastre e acompanhe suas obras</p>
+          </div>
+        </button>
+        <button
+          onClick={() => router.push('/client/expenses')}
+          className="flex items-center gap-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl p-4 text-left transition-all"
+        >
+          <span className="text-2xl">💸</span>
+          <div>
+            <p className="font-medium text-slate-200 text-sm">Controle de Gastos</p>
+            <p className="text-xs text-slate-500">Lance despesas e prepare a leitura de comprovantes</p>
           </div>
         </button>
         <button

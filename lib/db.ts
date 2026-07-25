@@ -183,6 +183,53 @@ export async function initDb(): Promise<void> {
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_person_idx ON employee_checkins (person_id, checkin_at DESC)`)
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_client_idx ON employee_checkins (client_id, checkin_at DESC)`)
 
+    // ── Gastos / comprovantes ───────────────────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS construction_expenses (
+        id SERIAL PRIMARY KEY,
+        client_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL,
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        title VARCHAR(255) NOT NULL,
+        category VARCHAR(50) NOT NULL DEFAULT 'material',
+        vendor_name VARCHAR(255),
+        amount_cents INTEGER NOT NULL,
+        expense_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        notes TEXT,
+        receipt_number VARCHAR(100),
+        receipt_total_cents INTEGER,
+        receipt_ocr_text TEXT,
+        ocr_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS title VARCHAR(255)`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS category VARCHAR(50) NOT NULL DEFAULT 'material'`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(255)`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS amount_cents INTEGER`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS expense_date DATE NOT NULL DEFAULT CURRENT_DATE`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS notes TEXT`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_number VARCHAR(100)`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_total_cents INTEGER`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_ocr_text TEXT`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS ocr_status VARCHAR(20) NOT NULL DEFAULT 'pending'`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_image_url TEXT`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_image_public_id VARCHAR(255)`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_image_format VARCHAR(30)`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_image_bytes INTEGER`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_image_width INTEGER`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_image_height INTEGER`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_uploaded_at TIMESTAMP WITH TIME ZONE`)
+    await client.query(`CREATE INDEX IF NOT EXISTS construction_expenses_client_idx ON construction_expenses (client_id, expense_date DESC, id DESC)`)
+    await client.query(`CREATE INDEX IF NOT EXISTS construction_expenses_obra_idx ON construction_expenses (obra_id, expense_date DESC)`)
+
+    await client.query(`UPDATE construction_expenses SET title = 'Gasto sem descrição' WHERE title IS NULL OR BTRIM(title) = ''`)
+    await client.query(`UPDATE construction_expenses SET amount_cents = 0 WHERE amount_cents IS NULL`)
+    await client.query(`ALTER TABLE construction_expenses ALTER COLUMN title SET NOT NULL`)
+    await client.query(`ALTER TABLE construction_expenses ALTER COLUMN amount_cents SET NOT NULL`)
+
     await client.query(`
       CREATE INDEX IF NOT EXISTS persons_embedding_hnsw_idx
         ON persons USING hnsw (embedding vector_l2_ops)
