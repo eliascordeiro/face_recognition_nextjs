@@ -102,6 +102,8 @@ export async function initDb(): Promise<void> {
     await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS document VARCHAR(20)`)
     await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS role VARCHAR(100)`)
     await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE`)
+    await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS access_password_hash VARCHAR(255)`)
+    await client.query(`ALTER TABLE persons ADD COLUMN IF NOT EXISTS allow_face_login BOOLEAN NOT NULL DEFAULT FALSE`)
 
     // Campos de perfil no usuário (cliente: endereço, telefone, GPS)
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`)
@@ -140,6 +142,26 @@ export async function initDb(): Promise<void> {
     // Escopo opcional do operador a uma única obra (ex.: apontador de campo
     // que só deve ver/atuar nos funcionários daquela obra específica).
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL`)
+
+    // ── Batidas de ponto / presença do funcionário ─────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS employee_checkins (
+        id SERIAL PRIMARY KEY,
+        person_id INTEGER NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
+        client_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL,
+        checkin_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        checkout_at TIMESTAMP WITH TIME ZONE,
+        checkin_lat DECIMAL(10,8),
+        checkin_lng DECIMAL(11,8),
+        checkout_lat DECIMAL(10,8),
+        checkout_lng DECIMAL(11,8),
+        notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `)
+    await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_person_idx ON employee_checkins (person_id, checkin_at DESC)`)
+    await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_client_idx ON employee_checkins (client_id, checkin_at DESC)`)
 
     await client.query(`
       CREATE INDEX IF NOT EXISTS persons_embedding_hnsw_idx

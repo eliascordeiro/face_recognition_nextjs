@@ -19,6 +19,7 @@ export default function Home() {
       setIsAuthenticated(true)
       if (user.role === 'admin') router.replace('/admin')
       else if (user.role === 'client') router.replace('/client')
+      else if (user.role === 'employee') router.replace('/employee')
       else router.replace('/recognize')
     }).catch(() => {
       setLoading(false)
@@ -62,6 +63,12 @@ export default function Home() {
                 Já tenho acesso
               </Link>
             </div>
+            <p className="text-xs text-slate-400 mt-3">
+              Funcionário de campo?{' '}
+              <Link href="/employee/login" className="text-sky-400 hover:text-sky-300">
+                Entrar no portal mobile
+              </Link>
+            </p>
           </section>
 
           <section className="elevated interactive-card rounded-2xl p-6 sm:p-8 backdrop-blur-sm">

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
 import { hasCapability } from '@/lib/permissions'
+import bcrypt from 'bcryptjs'
 
 function parseEmbedding(raw: unknown): number[] {
   if (!Array.isArray(raw) || raw.length !== 128) throw new Error('embedding deve ser um array de 128 números')
@@ -30,7 +31,9 @@ export async function GET() {
 
     const { rows } = await pool.query(
       `SELECT id, name, phone, email, document, role, active, thumbnail, created_at, obra_id,
-              (embedding IS NOT NULL) AS has_face
+              (embedding IS NOT NULL) AS has_face,
+              (access_password_hash IS NOT NULL) AS has_password_access,
+              allow_face_login
        FROM persons WHERE client_id = $1${obraFilter} ORDER BY created_at DESC`,
       params
     )
@@ -53,26 +56,50 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
 
-    const { name, phone, email, document, role, embedding, thumbnail } = await request.json()
+    const { name, phone, email, document, role, embedding, thumbnail, accessPassword } = await request.json()
 
     if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 255) {
       return NextResponse.json({ error: 'Nome inválido (2–255 caracteres)' }, { status: 422 })
     }
 
     const vectorStr = embedding != null ? `[${parseEmbedding(embedding).join(',')}]` : null
+    if (accessPassword != null && (typeof accessPassword !== 'string' || accessPassword.length < 6)) {
+      return NextResponse.json({ error: 'Senha de acesso deve ter no mínimo 6 caracteres' }, { status: 422 })
+    }
+    const accessPasswordHash = typeof accessPassword === 'string' && accessPassword.length >= 6
+      ? await bcrypt.hash(accessPassword, 10)
+      : null
     const cleanPhone = typeof phone === 'string' ? phone.replace(/\D/g, '').slice(0, 11) || null : null
     const cleanDocument = typeof document === 'string' ? document.replace(/\D/g, '').slice(0, 14) || null : null
     const cleanEmail = typeof email === 'string' && email.trim() ? email.trim().slice(0, 255) : null
     const cleanRole = typeof role === 'string' && role.trim() ? role.trim().slice(0, 100) : null
+    if (accessPasswordHash && !cleanEmail) {
+      return NextResponse.json({ error: 'Informe um e-mail para habilitar acesso com senha.' }, { status: 422 })
+    }
     // Operador vinculado a uma obra: funcionário criado por ele já nasce
     // alocado nessa mesma obra (mantém o escopo consistente).
     const obraId = auth.role === 'operator' && auth.obraId ? Number(auth.obraId) : null
 
     const { rows } = await pool.query(
-      `INSERT INTO persons (name, phone, email, document, role, embedding, thumbnail, client_id, obra_id)
-       VALUES ($1, $2, $3, $4, $5, $6::vector, $7, $8, $9)
-       RETURNING id, name, phone, email, document, role, active, created_at, obra_id, (embedding IS NOT NULL) AS has_face`,
-      [name.trim(), cleanPhone, cleanEmail, cleanDocument, cleanRole, vectorStr, typeof thumbnail === 'string' ? thumbnail : null, auth.clientId, obraId]
+      `INSERT INTO persons (name, phone, email, document, role, embedding, thumbnail, client_id, obra_id, access_password_hash, allow_face_login)
+       VALUES ($1, $2, $3, $4, $5, $6::vector, $7, $8, $9, $10, $11)
+       RETURNING id, name, phone, email, document, role, active, created_at, obra_id,
+                 (embedding IS NOT NULL) AS has_face,
+                 (access_password_hash IS NOT NULL) AS has_password_access,
+                 allow_face_login`,
+      [
+        name.trim(),
+        cleanPhone,
+        cleanEmail,
+        cleanDocument,
+        cleanRole,
+        vectorStr,
+        typeof thumbnail === 'string' ? thumbnail : null,
+        auth.clientId,
+        obraId,
+        accessPasswordHash,
+        Boolean(accessPasswordHash && vectorStr),
+      ]
     )
     return NextResponse.json(rows[0], { status: 201 })
   } catch (err: unknown) {

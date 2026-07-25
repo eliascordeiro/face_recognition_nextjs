@@ -8,6 +8,7 @@ const JWT_SECRET = new TextEncoder().encode(
 
 const PUBLIC_PATHS = [
   '/login',
+  '/employee/login',
   '/signup',
   '/forgot-password',
   '/reset-password',
@@ -17,6 +18,8 @@ const PUBLIC_PATHS = [
   '/api/auth/resend-verification',
   '/api/auth/forgot-password',
   '/api/auth/reset-password',
+  '/api/employee/auth/login',
+  '/api/employee/auth/face-login',
   '/api/health',
 ]
 
@@ -40,6 +43,9 @@ export async function proxy(request: NextRequest) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
     }
+    if (pathname.startsWith('/employee')) {
+      return NextResponse.redirect(new URL('/employee/login', request.url))
+    }
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
@@ -53,6 +59,21 @@ export async function proxy(request: NextRequest) {
       if (role === 'admin') return NextResponse.redirect(new URL('/admin', request.url))
       if (role === 'client') return NextResponse.redirect(new URL('/client', request.url))
       if (role === 'operator') return NextResponse.redirect(new URL('/recognize', request.url))
+      if (role === 'employee') return NextResponse.redirect(new URL('/employee', request.url))
+    }
+
+    // ── Portal do Funcionário ────────────────────────────────────────────
+    if (pathname.startsWith('/employee')) {
+      if (pathname === '/employee/login') {
+        if (role === 'employee') return NextResponse.redirect(new URL('/employee', request.url))
+        return NextResponse.next()
+      }
+      if (role !== 'employee') {
+        if (pathname.startsWith('/api/')) return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+        if (role === 'admin') return NextResponse.redirect(new URL('/admin', request.url))
+        if (role === 'client') return NextResponse.redirect(new URL('/client', request.url))
+        return NextResponse.redirect(new URL('/recognize', request.url))
+      }
     }
 
     // ── Área do Admin ──────────────────────────────────────────────────
@@ -67,6 +88,7 @@ export async function proxy(request: NextRequest) {
     if (pathname.startsWith('/client')) {
       if (role === 'admin') return NextResponse.redirect(new URL('/admin', request.url))
       if (role === 'operator') return NextResponse.redirect(new URL('/recognize', request.url))
+      if (role === 'employee') return NextResponse.redirect(new URL('/employee', request.url))
       // Only 'client' reaches here
     }
 
@@ -74,23 +96,32 @@ export async function proxy(request: NextRequest) {
     if (pathname === '/recognize') {
       if (role === 'admin') return NextResponse.redirect(new URL('/admin', request.url))
       if (role === 'client') return NextResponse.redirect(new URL('/client', request.url))
+      if (role === 'employee') return NextResponse.redirect(new URL('/employee', request.url))
     }
 
     // ── API /api/users — admin + client, not operator ──────────────────
     if (pathname.startsWith('/api/users')) {
-      if (role === 'operator') {
+      if (role === 'operator' || role === 'employee') {
         return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
       }
     }
 
     // ── API /api/persons e /api/recognize — client + operator only ──────
     if (pathname.startsWith('/api/persons') || pathname.startsWith('/api/recognize')) {
-      if (role === 'admin') {
+      if (role === 'admin' || role === 'employee') {
         return NextResponse.json({ error: 'Acesso negado — use um cliente ou operador' }, { status: 403 })
       }
       if (!clientId) {
         return NextResponse.json({ error: 'client_id não definido no token' }, { status: 403 })
       }
+    }
+
+    if (pathname.startsWith('/api/employee/auth/me') && role !== 'employee') {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    }
+
+    if (pathname.startsWith('/api/employee/checkins') && role !== 'employee') {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
 
     return NextResponse.next()

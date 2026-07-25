@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
 import { hasCapability } from '@/lib/permissions'
+import bcrypt from 'bcryptjs'
 
 function parseEmbedding(raw: unknown): number[] {
   if (!Array.isArray(raw) || raw.length !== 128) throw new Error('embedding deve ser um array de 128 números')
@@ -32,7 +33,23 @@ export async function PATCH(
 
     const body = await request.json()
 
-    const touchesProfile = ['name', 'phone', 'email', 'document', 'role', 'active', 'obraId'].some((k) => k in body)
+    if ('accessPassword' in body) {
+      const emailCandidate = typeof body.email === 'string' ? body.email.trim() : undefined
+      if (emailCandidate === '') {
+        return NextResponse.json({ error: 'Informe um e-mail para habilitar acesso com senha.' }, { status: 422 })
+      }
+      if (emailCandidate === undefined) {
+        const existing = await pool.query(
+          `SELECT email FROM persons WHERE id = $1 AND client_id = $2 LIMIT 1`,
+          [id, auth.clientId]
+        )
+        if (!existing.rowCount || !existing.rows[0].email) {
+          return NextResponse.json({ error: 'Informe um e-mail para habilitar acesso com senha.' }, { status: 422 })
+        }
+      }
+    }
+
+    const touchesProfile = ['name', 'phone', 'email', 'document', 'role', 'active', 'obraId', 'accessPassword'].some((k) => k in body)
     if (touchesProfile && !hasCapability(auth, 'employees.manage')) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
@@ -69,6 +86,14 @@ export async function PATCH(
     if (typeof body.active === 'boolean') {
       fields.push(`active = $${i++}`); values.push(body.active)
     }
+    if ('accessPassword' in body) {
+      if (typeof body.accessPassword !== 'string' || body.accessPassword.length < 6) {
+        return NextResponse.json({ error: 'Senha de acesso deve ter no mínimo 6 caracteres' }, { status: 422 })
+      }
+      const hash = await bcrypt.hash(body.accessPassword, 10)
+      fields.push(`access_password_hash = $${i++}`); values.push(hash)
+      fields.push(`allow_face_login = (embedding IS NOT NULL)`)
+    }
     if ('obraId' in body) {
       const obraId = body.obraId
       if (obraId !== null && (typeof obraId !== 'number' || !Number.isFinite(obraId))) {
@@ -79,6 +104,7 @@ export async function PATCH(
     if (body.embedding != null) {
       const emb = parseEmbedding(body.embedding)
       fields.push(`embedding = $${i++}::vector`); values.push(`[${emb.join(',')}]`)
+      fields.push(`allow_face_login = (access_password_hash IS NOT NULL)`)
       if (typeof body.thumbnail === 'string') {
         fields.push(`thumbnail = $${i++}`); values.push(body.thumbnail)
       }
@@ -97,7 +123,10 @@ export async function PATCH(
     const { rows } = await pool.query(
       `UPDATE persons SET ${fields.join(', ')}
        WHERE id = $${i++} AND client_id = $${i++}${scopeClause}
-       RETURNING id, name, phone, email, document, role, active, thumbnail, created_at, obra_id, (embedding IS NOT NULL) AS has_face`,
+       RETURNING id, name, phone, email, document, role, active, thumbnail, created_at, obra_id,
+                 (embedding IS NOT NULL) AS has_face,
+                 (access_password_hash IS NOT NULL) AS has_password_access,
+                 allow_face_login`,
       values
     )
     if (rows.length === 0) {

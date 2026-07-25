@@ -16,6 +16,8 @@ interface Employee {
   active: boolean
   thumbnail: string | null
   has_face: boolean
+  has_password_access: boolean
+  allow_face_login: boolean
   created_at: string
 }
 
@@ -63,7 +65,7 @@ export default function EmployeesPage() {
   }
 
   function handleCreated(employee: Employee) {
-    setEmployees((prev) => [{ ...employee, has_face: false, thumbnail: null }, ...prev])
+    setEmployees((prev) => [{ ...employee }, ...prev])
     setModal(null)
   }
 
@@ -168,15 +170,26 @@ export default function EmployeesPage() {
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold text-slate-100 truncate">{emp.name}</p>
                   <p className="text-slate-400 text-xs truncate">{emp.role || 'Cargo não informado'}</p>
-                  <span
-                    className={`inline-flex items-center gap-1 mt-1.5 text-[11px] px-2 py-0.5 rounded-full border ${
-                      emp.has_face
-                        ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300'
-                        : 'bg-amber-900/40 border-amber-700 text-amber-300'
-                    }`}
-                  >
-                    {emp.has_face ? '✅ Reconhecimento ativo' : '⚠️ Facial pendente'}
-                  </span>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    <span
+                      className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
+                        emp.has_face
+                          ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300'
+                          : 'bg-amber-900/40 border-amber-700 text-amber-300'
+                      }`}
+                    >
+                      {emp.has_face ? '✅ Facial ativo' : '⚠️ Facial pendente'}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
+                        emp.has_password_access
+                          ? 'bg-sky-900/40 border-sky-700 text-sky-300'
+                          : 'bg-slate-700/40 border-slate-600 text-slate-300'
+                      }`}
+                    >
+                      {emp.has_password_access ? '🔐 Senha ativa' : '🔐 Sem senha'}
+                    </span>
+                  </div>
                 </div>
               </div>
 

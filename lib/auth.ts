@@ -6,14 +6,15 @@ const JWT_SECRET = new TextEncoder().encode(
 )
 
 export interface JwtPayload {
-  sub: string        // user id
+  sub: string        // user id (admin/client/operator) or employee id
   username: string
   email?: string
-  role: 'admin' | 'client' | 'operator'
+  role: 'admin' | 'client' | 'operator' | 'employee'
   clientId?: string  // client's own id (role=client) or parent client id (role=operator)
   fullName?: string  // display name
   permissions?: string[] // capacidades liberadas (só relevante para role=operator)
   obraId?: string    // escopo opcional do operador a uma única obra
+  employeeId?: string // vínculo ao registro em persons (role=employee)
 }
 
 export async function signToken(payload: JwtPayload): Promise<string> {

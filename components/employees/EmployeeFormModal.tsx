@@ -42,6 +42,7 @@ export default function EmployeeFormModal({ initial, onClose, onSaved }: Props) 
   const [form, setForm] = useState<EmployeeFormData>(
     initial ?? { name: '', phone: '', email: '', document: '', role: '' }
   )
+  const [accessPassword, setAccessPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -52,6 +53,10 @@ export default function EmployeeFormModal({ initial, onClose, onSaved }: Props) 
       setError('Informe o nome completo do funcionário.')
       return
     }
+    if (accessPassword && accessPassword.length < 6) {
+      setError('Senha de acesso deve ter no mínimo 6 caracteres.')
+      return
+    }
     setLoading(true)
     try {
       const payload = {
@@ -60,6 +65,7 @@ export default function EmployeeFormModal({ initial, onClose, onSaved }: Props) 
         email: form.email.trim() || null,
         document: form.document,
         role: form.role.trim() || null,
+        accessPassword: accessPassword || undefined,
       }
       const res = await fetch(isEdit ? `/api/persons/${initial!.id}` : '/api/persons', {
         method: isEdit ? 'PATCH' : 'POST',
@@ -140,7 +146,7 @@ export default function EmployeeFormModal({ initial, onClose, onSaved }: Props) 
 
           <div>
             <label className="block text-xs text-slate-400 mb-1">
-              E-mail <span className="text-slate-500">(para futuro acesso ao sistema)</span>
+              E-mail <span className="text-slate-500">(usado no portal do funcionário)</span>
             </label>
             <input
               type="email"
@@ -151,9 +157,24 @@ export default function EmployeeFormModal({ initial, onClose, onSaved }: Props) 
             />
           </div>
 
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">
+              Senha de acesso do funcionário
+              {isEdit ? <span className="text-slate-500"> (opcional para redefinir)</span> : null}
+            </label>
+            <input
+              type="password"
+              minLength={6}
+              value={accessPassword}
+              onChange={(e) => setAccessPassword(e.target.value)}
+              placeholder="Mínimo 6 caracteres"
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-sky-500"
+            />
+          </div>
+
           {!isEdit && (
             <p className="text-xs text-slate-500 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2">
-              💡 Após salvar, cadastre o reconhecimento facial pelo botão dedicado na lista.
+              💡 Após salvar, cadastre o reconhecimento facial pelo botão dedicado na lista para habilitar login facial.
             </p>
           )}
 
