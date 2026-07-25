@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
     const action = searchParams.get('action')
     const actor = searchParams.get('actor')
     const period = searchParams.get('period') ?? '30d'
+    const query = (searchParams.get('q') ?? '').trim()
     const limitRaw = Number(searchParams.get('limit') ?? '8')
     const offsetRaw = Number(searchParams.get('offset') ?? '0')
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 50)) : 8
@@ -54,6 +55,17 @@ export async function GET(request: NextRequest) {
         params.push(actor)
         whereClause += ` AND COALESCE(u.username, '') = $${params.length}`
       }
+    }
+
+    if (query) {
+      params.push(`%${query}%`)
+      const queryParam = `$${params.length}`
+      whereClause += ` AND (
+        COALESCE(e.title, '') ILIKE ${queryParam}
+        OR COALESCE(u.username, '') ILIKE ${queryParam}
+        OR COALESCE(u.full_name, '') ILIKE ${queryParam}
+        OR COALESCE(a.action, '') ILIKE ${queryParam}
+      )`
     }
 
     whereClause += buildPeriodClause(period, params)

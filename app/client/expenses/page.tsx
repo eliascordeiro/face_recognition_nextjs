@@ -59,6 +59,21 @@ interface AuditUserOption {
   label: string
 }
 
+interface ExpenseListResponse {
+  items: Expense[]
+  pagination?: {
+    limit: number
+    offset: number
+    total: number
+    hasMore: boolean
+  }
+  summary?: {
+    totalAmountCents: number
+    withImageCount: number
+    withOcrCount: number
+  }
+}
+
 type ExpenseSortOption = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc' | 'title_asc'
 type AuditSortOption = 'recent_desc' | 'recent_asc' | 'action_asc' | 'user_asc'
 
@@ -173,39 +188,6 @@ function describeChangedFields(entry: ExpenseAuditEntry) {
   }).map((key) => AUDIT_FIELD_LABELS[key])
 }
 
-function isExpenseInPeriod(dateValue: string, period: string) {
-  if (period === 'all') return true
-
-  const expenseDate = new Date(`${dateValue}T00:00:00`)
-  if (Number.isNaN(expenseDate.getTime())) return false
-
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-
-  if (period === '7d') {
-    const start = new Date(today)
-    start.setDate(start.getDate() - 6)
-    return expenseDate >= start && expenseDate <= today
-  }
-
-  if (period === '30d') {
-    const start = new Date(today)
-    start.setDate(start.getDate() - 29)
-    return expenseDate >= start && expenseDate <= today
-  }
-
-  if (period === 'this_month') {
-    return expenseDate.getFullYear() === today.getFullYear() && expenseDate.getMonth() === today.getMonth()
-  }
-
-  if (period === 'last_month') {
-    const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-    return expenseDate.getFullYear() === lastMonth.getFullYear() && expenseDate.getMonth() === lastMonth.getMonth()
-  }
-
-  return true
-}
-
 function inputToApiMoney(value: string) {
   return value.replace(/\./g, '').replace(',', '.')
 }
@@ -300,6 +282,13 @@ export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [obras, setObras] = useState<ObraOption[]>([])
   const [loading, setLoading] = useState(true)
+  const [expenseLoadingMore, setExpenseLoadingMore] = useState(false)
+  const [expenseOffset, setExpenseOffset] = useState(0)
+  const [expenseTotalCount, setExpenseTotalCount] = useState(0)
+  const [expensePageSize] = useState(12)
+  const [expenseHasMore, setExpenseHasMore] = useState(false)
+  const [expenseSummary, setExpenseSummary] = useState({ totalAmountCents: 0, withImageCount: 0, withOcrCount: 0 })
+  const [expenseRefreshToken, setExpenseRefreshToken] = useState(0)
   const [saving, setSaving] = useState(false)
   const [ocrRunning, setOcrRunning] = useState(false)
   const [ocrProgress, setOcrProgress] = useState(0)
@@ -320,6 +309,7 @@ export default function ExpensesPage() {
   const [auditActionFilter, setAuditActionFilter] = useState<'all' | ExpenseAuditEntry['action']>('all')
   const [auditUserFilter, setAuditUserFilter] = useState('all')
   const [auditPeriodFilter, setAuditPeriodFilter] = useState('30d')
+  const [auditSearch, setAuditSearch] = useState('')
   const [auditSort, setAuditSort] = useState<AuditSortOption>('recent_desc')
   const [auditOffset, setAuditOffset] = useState(0)
   const [auditTotalCount, setAuditTotalCount] = useState(0)
@@ -333,15 +323,63 @@ export default function ExpensesPage() {
   const [form, setForm] = useState(EMPTY_FORM)
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/expenses').then(async (res) => (res.ok ? res.json() : [])),
-      fetch('/api/obras').then(async (res) => (res.ok ? res.json() : [])),
-    ]).then(([expenseData, obraData]) => {
-      setExpenses(Array.isArray(expenseData) ? expenseData : [])
+    let cancelled = false
+
+    fetch('/api/obras').then(async (res) => (res.ok ? res.json() : [])).then((obraData) => {
+      if (cancelled) return
       setObras(Array.isArray(obraData) ? obraData.map((obra) => ({ id: obra.id, name: obra.name })) : [])
-      setLoading(false)
     })
+
+    return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadExpensesPage() {
+      setLoading(true)
+      const params = new URLSearchParams({
+        q: search.trim(),
+        category: categoryFilter,
+        obra: obraFilter === '' ? 'none' : obraFilter,
+        period: periodFilter,
+        sort: expenseSort,
+        limit: String(expensePageSize),
+        offset: '0',
+      })
+
+      const res = await fetch(`/api/expenses?${params.toString()}`)
+      const data = await res.json().catch(() => null) as ExpenseListResponse | null
+      if (cancelled) return
+
+      if (!res.ok || !data) {
+        setExpenses([])
+        setExpenseOffset(0)
+        setExpenseTotalCount(0)
+        setExpenseHasMore(false)
+        setExpenseSummary({ totalAmountCents: 0, withImageCount: 0, withOcrCount: 0 })
+        setLoading(false)
+        return
+      }
+
+      const items = Array.isArray(data.items) ? data.items : []
+      const total = typeof data.pagination?.total === 'number' ? data.pagination.total : items.length
+      setExpenses(items)
+      setExpenseOffset(items.length)
+      setExpenseTotalCount(total)
+      setExpenseHasMore(Boolean(data.pagination?.hasMore))
+      setExpenseSummary({
+        totalAmountCents: typeof data.summary?.totalAmountCents === 'number' ? data.summary.totalAmountCents : 0,
+        withImageCount: typeof data.summary?.withImageCount === 'number' ? data.summary.withImageCount : 0,
+        withOcrCount: typeof data.summary?.withOcrCount === 'number' ? data.summary.withOcrCount : 0,
+      })
+      setLoading(false)
+    }
+
+    loadExpensesPage()
+
+    return () => { cancelled = true }
+  }, [search, categoryFilter, obraFilter, periodFilter, expenseSort, expensePageSize, expenseRefreshToken])
 
   useEffect(() => {
     let cancelled = false
@@ -353,6 +391,7 @@ export default function ExpensesPage() {
         action: auditActionFilter,
         actor: auditUserFilter,
         period: auditPeriodFilter,
+        q: auditSearch,
         limit: String(auditPageSize),
         offset: String(nextOffset),
       })
@@ -379,60 +418,12 @@ export default function ExpensesPage() {
     loadAudit(false)
 
     return () => { cancelled = true }
-  }, [auditActionFilter, auditUserFilter, auditPeriodFilter, auditPageSize])
+  }, [auditActionFilter, auditUserFilter, auditPeriodFilter, auditSearch, auditPageSize])
 
-  const totalExpenses = useMemo(
-    () => expenses.reduce((sum, expense) => sum + expense.amount_cents, 0),
-    [expenses]
-  )
-
-  const filteredExpenses = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    const filtered = expenses.filter((expense) => {
-      if (categoryFilter !== 'all' && expense.category !== categoryFilter) return false
-      if (obraFilter !== 'all' && String(expense.obra_id ?? '') !== obraFilter) return false
-      if (!isExpenseInPeriod(expense.expense_date, periodFilter)) return false
-
-      if (!query) return true
-      const haystack = [
-        expense.title,
-        expense.vendor_name ?? '',
-        expense.obra_name ?? '',
-        expense.receipt_number ?? '',
-        expense.notes ?? '',
-      ].join(' ').toLowerCase()
-      return haystack.includes(query)
-    })
-
-    return [...filtered].sort((left, right) => {
-      if (expenseSort === 'date_desc') {
-        return new Date(right.expense_date).getTime() - new Date(left.expense_date).getTime() || right.id - left.id
-      }
-      if (expenseSort === 'date_asc') {
-        return new Date(left.expense_date).getTime() - new Date(right.expense_date).getTime() || left.id - right.id
-      }
-      if (expenseSort === 'amount_desc') {
-        return right.amount_cents - left.amount_cents || right.id - left.id
-      }
-      if (expenseSort === 'amount_asc') {
-        return left.amount_cents - right.amount_cents || left.id - right.id
-      }
-      return left.title.localeCompare(right.title, 'pt-BR')
-    })
-  }, [expenses, search, categoryFilter, obraFilter, periodFilter, expenseSort])
+  const filteredExpenses = expenses
 
   const filteredTotal = useMemo(
     () => filteredExpenses.reduce((sum, expense) => sum + expense.amount_cents, 0),
-    [filteredExpenses]
-  )
-
-  const withReceiptText = useMemo(
-    () => expenses.filter((expense) => expense.receipt_ocr_text && expense.receipt_ocr_text.trim().length > 0).length,
-    [expenses]
-  )
-
-  const filteredWithImages = useMemo(
-    () => filteredExpenses.filter((expense) => Boolean(expense.receipt_image_url)).length,
     [filteredExpenses]
   )
 
@@ -488,12 +479,48 @@ export default function ExpensesPage() {
     })
   }, [recentAuditEntries, auditSort])
 
+  async function loadMoreExpenses() {
+    if (expenseLoadingMore || !expenseHasMore) return
+
+    setExpenseLoadingMore(true)
+    const params = new URLSearchParams({
+      q: search.trim(),
+      category: categoryFilter,
+      obra: obraFilter === '' ? 'none' : obraFilter,
+      period: periodFilter,
+      sort: expenseSort,
+      limit: String(expensePageSize),
+      offset: String(expenseOffset),
+    })
+
+    const res = await fetch(`/api/expenses?${params.toString()}`)
+    const data = await res.json().catch(() => null) as ExpenseListResponse | null
+    if (!res.ok || !data) {
+      setExpenseLoadingMore(false)
+      return
+    }
+
+    const items = Array.isArray(data.items) ? data.items : []
+    const total = typeof data.pagination?.total === 'number' ? data.pagination.total : expenseTotalCount
+    setExpenses((prev) => [...prev, ...items])
+    setExpenseOffset((prev) => prev + items.length)
+    setExpenseTotalCount(total)
+    setExpenseHasMore(Boolean(data.pagination?.hasMore))
+    setExpenseSummary((prev) => ({
+      totalAmountCents: typeof data.summary?.totalAmountCents === 'number' ? data.summary.totalAmountCents : prev.totalAmountCents,
+      withImageCount: typeof data.summary?.withImageCount === 'number' ? data.summary.withImageCount : prev.withImageCount,
+      withOcrCount: typeof data.summary?.withOcrCount === 'number' ? data.summary.withOcrCount : prev.withOcrCount,
+    }))
+    setExpenseLoadingMore(false)
+  }
+
   async function loadMoreAuditEntries() {
     setRecentAuditLoading(true)
     const params = new URLSearchParams({
       action: auditActionFilter,
       actor: auditUserFilter,
       period: auditPeriodFilter,
+      q: auditSearch,
       limit: String(auditPageSize),
       offset: String(auditOffset),
     })
@@ -676,10 +703,11 @@ export default function ExpensesPage() {
       bodyStyles: { textColor: [30, 41, 59] },
       head: [['Indicador', 'Valor']],
       body: [
-        ['Lancamentos no recorte', String(filteredExpenses.length)],
-        ['Total filtrado', formatMoney(filteredTotal)],
-        ['Com comprovante', String(filteredWithImages)],
-        ['Com OCR', String(withReceiptText)],
+        ['Lancamentos no filtro', String(expenseTotalCount)],
+        ['Lancamentos carregados', String(filteredExpenses.length)],
+        ['Total do filtro', formatMoney(expenseSummary.totalAmountCents)],
+        ['Com comprovante', String(expenseSummary.withImageCount)],
+        ['Com OCR', String(expenseSummary.withOcrCount)],
       ],
     })
 
@@ -924,15 +952,8 @@ export default function ExpensesPage() {
       return
     }
 
-    const obraName = obras.find((obra) => obra.id === data.obra_id)?.name ?? null
-    if (isEditing) {
-      setExpenses((prev) => prev.map((expense) => (
-        expense.id === data.id ? { ...expense, ...data, obra_name: obraName } : expense
-      )))
-    } else {
-      setExpenses((prev) => [{ ...data, obra_name: obraName }, ...prev])
-    }
     resetForm()
+    setExpenseRefreshToken((prev) => prev + 1)
   }
 
   async function deleteExpense(expense: Expense) {
@@ -945,7 +966,7 @@ export default function ExpensesPage() {
       return
     }
 
-    setExpenses((prev) => prev.filter((item) => item.id !== expense.id))
+    setExpenseRefreshToken((prev) => prev + 1)
     setRecentAuditEntries((prev) => prev.filter((entry) => entry.expense_id !== expense.id || entry.action !== 'delete'))
     if (editingExpenseId === expense.id) {
       resetForm()
@@ -1006,18 +1027,18 @@ export default function ExpensesPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 min-w-full lg:min-w-[420px]">
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
               <p className="text-xs uppercase tracking-widest text-slate-500">No recorte</p>
-              <p className="mt-2 text-2xl font-bold text-white">{loading ? '…' : filteredExpenses.length}</p>
-              <p className="mt-1 text-xs text-slate-500">Total geral: {expenses.length}</p>
+              <p className="mt-2 text-2xl font-bold text-white">{loading ? '…' : expenseTotalCount}</p>
+              <p className="mt-1 text-xs text-slate-500">Carregados: {filteredExpenses.length}</p>
             </div>
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
               <p className="text-xs uppercase tracking-widest text-slate-500">Total filtrado</p>
-              <p className="mt-2 text-2xl font-bold text-emerald-400">{loading ? '…' : formatMoney(filteredTotal)}</p>
-              <p className="mt-1 text-xs text-slate-500">Total geral: {formatMoney(totalExpenses)}</p>
+              <p className="mt-2 text-2xl font-bold text-emerald-400">{loading ? '…' : formatMoney(expenseSummary.totalAmountCents)}</p>
+              <p className="mt-1 text-xs text-slate-500">Carregados: {formatMoney(filteredTotal)}</p>
             </div>
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
               <p className="text-xs uppercase tracking-widest text-slate-500">Com comprovante</p>
-              <p className="mt-2 text-2xl font-bold text-amber-300">{loading ? '…' : filteredWithImages}</p>
-              <p className="mt-1 text-xs text-slate-500">Com OCR: {withReceiptText}</p>
+              <p className="mt-2 text-2xl font-bold text-amber-300">{loading ? '…' : expenseSummary.withImageCount}</p>
+              <p className="mt-1 text-xs text-slate-500">Com OCR: {expenseSummary.withOcrCount}</p>
             </div>
           </div>
         </div>
@@ -1194,6 +1215,15 @@ export default function ExpensesPage() {
               <option value="action_asc">Ação (A-Z)</option>
               <option value="user_asc">Usuário (A-Z)</option>
             </select>
+          </div>
+          <div className="md:col-span-2 xl:col-span-4">
+            <label className="mb-1.5 block text-sm text-slate-300">Busca textual</label>
+            <input
+              value={auditSearch}
+              onChange={(e) => setAuditSearch(e.target.value)}
+              placeholder="Buscar por gasto, usuário ou ação..."
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
+            />
           </div>
         </div>
 
@@ -1679,6 +1709,16 @@ export default function ExpensesPage() {
                   )}
                 </article>
               ))}
+              {expenseHasMore && (
+                <button
+                  type="button"
+                  onClick={loadMoreExpenses}
+                  disabled={expenseLoadingMore}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-3 text-sm font-medium text-slate-200 transition hover:border-amber-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {expenseLoadingMore ? 'Carregando...' : `Carregar mais gastos (${filteredExpenses.length}/${expenseTotalCount})`}
+                </button>
+              )}
             </div>
           )}
         </section>

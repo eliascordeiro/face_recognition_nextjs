@@ -4,6 +4,22 @@ import { getAuthUser } from '@/lib/auth'
 import { logExpenseAudit } from '@/lib/expenseAudit'
 
 const VALID_CATEGORIES = ['material', 'alimentacao', 'transporte', 'equipamento', 'servico', 'outros']
+const VALID_SORTS = {
+  date_desc: 'e.expense_date DESC, e.id DESC',
+  date_asc: 'e.expense_date ASC, e.id ASC',
+  amount_desc: 'e.amount_cents DESC, e.id DESC',
+  amount_asc: 'e.amount_cents ASC, e.id ASC',
+  title_asc: 'e.title ASC, e.id DESC',
+} as const
+
+function clampInt(value: string | null, fallback: number, min: number, max: number) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  const rounded = Math.trunc(parsed)
+  if (rounded < min) return min
+  if (rounded > max) return max
+  return rounded
+}
 
 function toCents(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value * 100)
@@ -14,13 +30,68 @@ function toCents(value: unknown): number | null {
   return Math.round(parsed * 100)
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     await initDb()
     const auth = await getAuthUser()
     if (!auth || auth.role !== 'client') {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
+
+    const { searchParams } = new URL(request.url)
+    const queryText = (searchParams.get('q') ?? '').trim()
+    const category = (searchParams.get('category') ?? 'all').trim()
+    const obra = (searchParams.get('obra') ?? 'all').trim()
+    const period = (searchParams.get('period') ?? 'all').trim()
+    const sort = (searchParams.get('sort') ?? 'date_desc').trim() as keyof typeof VALID_SORTS
+    const limit = clampInt(searchParams.get('limit'), 12, 1, 100)
+    const offset = clampInt(searchParams.get('offset'), 0, 0, 50000)
+
+    const whereClauses: string[] = ['e.client_id = $1']
+    const params: Array<number | string> = [auth.sub]
+
+    if (category !== 'all' && VALID_CATEGORIES.includes(category)) {
+      params.push(category)
+      whereClauses.push(`e.category = $${params.length}`)
+    }
+
+    if (obra !== 'all') {
+      if (obra === 'none' || obra === '') {
+        whereClauses.push('e.obra_id IS NULL')
+      } else {
+        const obraId = Number(obra)
+        if (Number.isFinite(obraId) && obraId > 0) {
+          params.push(obraId)
+          whereClauses.push(`e.obra_id = $${params.length}`)
+        }
+      }
+    }
+
+    if (period === '7d') {
+      whereClauses.push(`e.expense_date >= CURRENT_DATE - INTERVAL '6 day'`)
+    } else if (period === '30d') {
+      whereClauses.push(`e.expense_date >= CURRENT_DATE - INTERVAL '29 day'`)
+    } else if (period === 'this_month') {
+      whereClauses.push(`e.expense_date >= DATE_TRUNC('month', CURRENT_DATE)::date`)
+    } else if (period === 'last_month') {
+      whereClauses.push(`e.expense_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')::date`)
+      whereClauses.push(`e.expense_date < DATE_TRUNC('month', CURRENT_DATE)::date`)
+    }
+
+    if (queryText) {
+      params.push(`%${queryText}%`)
+      whereClauses.push(`(
+        e.title ILIKE $${params.length}
+        OR COALESCE(e.vendor_name, '') ILIKE $${params.length}
+        OR COALESCE(e.notes, '') ILIKE $${params.length}
+        OR COALESCE(e.receipt_number, '') ILIKE $${params.length}
+        OR COALESCE(o.name, '') ILIKE $${params.length}
+      )`)
+    }
+
+    const whereSql = whereClauses.join(' AND ')
+    const orderSql = VALID_SORTS[sort] ?? VALID_SORTS.date_desc
+    const listParams = [...params, limit, offset]
 
     const { rows } = await pool.query(
       `SELECT e.id, e.title, e.category, e.vendor_name, e.amount_cents,
@@ -32,12 +103,51 @@ export async function GET() {
               o.name AS obra_name
        FROM construction_expenses e
        LEFT JOIN obras o ON o.id = e.obra_id
-       WHERE e.client_id = $1
-       ORDER BY e.expense_date DESC, e.id DESC`,
-      [auth.sub]
+       WHERE ${whereSql}
+       ORDER BY ${orderSql}
+       LIMIT $${params.length + 1}
+       OFFSET $${params.length + 2}`,
+      listParams
     )
 
-    return NextResponse.json(rows)
+    const summaryResult = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_count,
+         COALESCE(SUM(e.amount_cents), 0)::bigint AS total_amount_cents,
+         COUNT(*) FILTER (WHERE e.receipt_image_url IS NOT NULL)::int AS with_image_count,
+         COUNT(*) FILTER (
+           WHERE e.receipt_ocr_text IS NOT NULL
+             AND BTRIM(e.receipt_ocr_text) <> ''
+         )::int AS with_ocr_count
+       FROM construction_expenses e
+       LEFT JOIN obras o ON o.id = e.obra_id
+       WHERE ${whereSql}`,
+      params
+    )
+
+    const summary = summaryResult.rows[0] ?? {
+      total_count: 0,
+      total_amount_cents: 0,
+      with_image_count: 0,
+      with_ocr_count: 0,
+    }
+
+    const total = Number(summary.total_count) || 0
+
+    return NextResponse.json({
+      items: rows,
+      pagination: {
+        limit,
+        offset,
+        total,
+        hasMore: offset + rows.length < total,
+      },
+      summary: {
+        totalAmountCents: Number(summary.total_amount_cents) || 0,
+        withImageCount: Number(summary.with_image_count) || 0,
+        withOcrCount: Number(summary.with_ocr_count) || 0,
+      },
+    })
   } catch {
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
   }
