@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
+import { getCheckinMaxDistanceMeters, haversineDistanceMeters } from '@/lib/geo'
 
 function toNumericOrNull(value: unknown) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
@@ -25,7 +26,8 @@ export async function GET() {
     )
 
     const history = await pool.query(
-      `SELECT id, checkin_at, checkout_at, checkin_lat, checkin_lng, checkout_lat, checkout_lng, notes
+      `SELECT id, checkin_at, checkout_at, checkin_lat, checkin_lng, checkin_distance_meters,
+              checkout_lat, checkout_lng, checkout_distance_meters, notes
        FROM employee_checkins
        WHERE person_id = $1
        ORDER BY checkin_at DESC
@@ -63,16 +65,50 @@ export async function POST(request: NextRequest) {
     const lng = toNumericOrNull(body.lng)
     const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 500) || null : null
 
+    if (!auth.obraId) {
+      return NextResponse.json({ error: 'Funcionário sem obra vinculada. Contate o administrador.' }, { status: 422 })
+    }
+    if (lat == null || lng == null) {
+      return NextResponse.json({ error: 'Localização atual obrigatória para registrar presença.' }, { status: 422 })
+    }
+
+    const obra = await pool.query(
+      `SELECT id, lat, lng FROM obras WHERE id = $1 AND client_id = $2 LIMIT 1`,
+      [Number(auth.obraId), Number(auth.clientId)]
+    )
+    if (!obra.rowCount) {
+      return NextResponse.json({ error: 'Obra vinculada não encontrada.' }, { status: 404 })
+    }
+    const obraLat = obra.rows[0].lat != null ? Number(obra.rows[0].lat) : null
+    const obraLng = obra.rows[0].lng != null ? Number(obra.rows[0].lng) : null
+    if (obraLat == null || obraLng == null) {
+      return NextResponse.json({ error: 'A obra não possui coordenadas GPS configuradas.' }, { status: 422 })
+    }
+
+    const distanceMeters = Math.round(haversineDistanceMeters(lat, lng, obraLat, obraLng))
+    const maxDistanceMeters = getCheckinMaxDistanceMeters()
+    if (distanceMeters > maxDistanceMeters) {
+      return NextResponse.json(
+        {
+          error: `Você está fora do raio permitido para esta obra (${distanceMeters}m). Máximo: ${maxDistanceMeters}m.`,
+          distanceMeters,
+          maxDistanceMeters,
+        },
+        { status: 403 }
+      )
+    }
+
     const created = await pool.query(
-      `INSERT INTO employee_checkins (person_id, client_id, obra_id, checkin_lat, checkin_lng, notes)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, checkin_at, checkin_lat, checkin_lng, notes`,
+      `INSERT INTO employee_checkins (person_id, client_id, obra_id, checkin_lat, checkin_lng, checkin_distance_meters, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, checkin_at, checkin_lat, checkin_lng, checkin_distance_meters, notes`,
       [
         Number(auth.employeeId),
         Number(auth.clientId),
         auth.obraId ? Number(auth.obraId) : null,
         lat,
         lng,
+        distanceMeters,
         notes,
       ]
     )

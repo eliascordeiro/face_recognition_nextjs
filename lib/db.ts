@@ -154,12 +154,16 @@ export async function initDb(): Promise<void> {
         checkout_at TIMESTAMP WITH TIME ZONE,
         checkin_lat DECIMAL(10,8),
         checkin_lng DECIMAL(11,8),
+        checkin_distance_meters INTEGER,
         checkout_lat DECIMAL(10,8),
         checkout_lng DECIMAL(11,8),
+        checkout_distance_meters INTEGER,
         notes TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )
     `)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkin_distance_meters INTEGER`)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkout_distance_meters INTEGER`)
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_person_idx ON employee_checkins (person_id, checkin_at DESC)`)
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_client_idx ON employee_checkins (client_id, checkin_at DESC)`)
 
