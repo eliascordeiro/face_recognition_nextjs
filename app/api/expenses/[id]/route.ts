@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
 import { logExpenseAudit } from '@/lib/expenseAudit'
+import { deleteReceiptImage } from '@/lib/cloudinary'
 
 const VALID_CATEGORIES = ['material', 'alimentacao', 'transporte', 'equipamento', 'servico', 'outros']
 
@@ -14,7 +15,10 @@ function toCents(value: unknown): number | null {
   return Math.round(parsed * 100)
 }
 
-export async function GET() {
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     await initDb()
     const auth = await getAuthUser()
@@ -22,33 +26,10 @@ export async function GET() {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
 
-    const { rows } = await pool.query(
-      `SELECT e.id, e.title, e.category, e.vendor_name, e.amount_cents,
-              e.expense_date, e.notes, e.receipt_number, e.receipt_total_cents,
-              e.receipt_ocr_text, e.ocr_status, e.created_at, e.obra_id,
-              e.receipt_image_url, e.receipt_image_public_id, e.receipt_image_format,
-              e.receipt_image_bytes, e.receipt_image_width, e.receipt_image_height,
-              e.receipt_uploaded_at,
-              o.name AS obra_name
-       FROM construction_expenses e
-       LEFT JOIN obras o ON o.id = e.obra_id
-       WHERE e.client_id = $1
-       ORDER BY e.expense_date DESC, e.id DESC`,
-      [auth.sub]
-    )
-
-    return NextResponse.json(rows)
-  } catch {
-    return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    await initDb()
-    const auth = await getAuthUser()
-    if (!auth || auth.role !== 'client') {
-      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    const { id } = await params
+    const expenseId = Number(id)
+    if (!Number.isFinite(expenseId)) {
+      return NextResponse.json({ error: 'Gasto inválido' }, { status: 422 })
     }
 
     const body = await request.json()
@@ -96,17 +77,40 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await pool.connect()
+    let oldReceiptPublicIdToDelete: string | null = null
     try {
       await client.query('BEGIN')
-      const { rows } = await client.query(
-        `INSERT INTO construction_expenses (
-           client_id, obra_id, created_by_user_id, title, category,
-           vendor_name, amount_cents, expense_date, notes,
-           receipt_number, receipt_total_cents, receipt_ocr_text, ocr_status,
-           receipt_image_url, receipt_image_public_id, receipt_image_format,
-           receipt_image_bytes, receipt_image_width, receipt_image_height, receipt_uploaded_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::date, CURRENT_DATE), $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+
+      const before = await client.query(
+        `SELECT * FROM construction_expenses WHERE id = $1 AND client_id = $2 LIMIT 1`,
+        [expenseId, auth.sub]
+      )
+      if (before.rowCount === 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Gasto não encontrado' }, { status: 404 })
+      }
+
+      const { rows, rowCount } = await client.query(
+        `UPDATE construction_expenses
+         SET obra_id = $1,
+             title = $2,
+             category = $3,
+             vendor_name = $4,
+             amount_cents = $5,
+             expense_date = COALESCE($6::date, CURRENT_DATE),
+             notes = $7,
+             receipt_number = $8,
+             receipt_total_cents = $9,
+             receipt_ocr_text = $10,
+             ocr_status = $11,
+             receipt_image_url = $12,
+             receipt_image_public_id = $13,
+             receipt_image_format = $14,
+             receipt_image_bytes = $15,
+             receipt_image_width = $16,
+             receipt_image_height = $17,
+             receipt_uploaded_at = CASE WHEN $12 IS NOT NULL THEN COALESCE(receipt_uploaded_at, NOW()) ELSE NULL END
+         WHERE id = $18 AND client_id = $19
          RETURNING id, title, category, vendor_name, amount_cents,
                    expense_date, notes, receipt_number, receipt_total_cents,
                    receipt_ocr_text, ocr_status, created_at, obra_id,
@@ -114,9 +118,7 @@ export async function POST(request: NextRequest) {
                    receipt_image_bytes, receipt_image_width, receipt_image_height,
                    receipt_uploaded_at`,
         [
-          auth.sub,
           obraId,
-          auth.sub,
           title,
           category,
           vendorName,
@@ -133,21 +135,115 @@ export async function POST(request: NextRequest) {
           receiptImageBytes,
           receiptImageWidth,
           receiptImageHeight,
-          receiptImageUrl ? new Date().toISOString() : null,
+          expenseId,
+          auth.sub,
         ]
       )
 
+      if (rowCount === 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Gasto não encontrado' }, { status: 404 })
+      }
+
       await logExpenseAudit({
         client,
-        expenseId: rows[0].id,
+        expenseId,
         clientId: Number(auth.sub),
         actorUserId: Number(auth.sub),
-        action: 'create',
+        action: 'update',
+        beforeState: before.rows[0],
         afterState: rows[0],
       })
 
+      const previousPublicId = typeof before.rows[0].receipt_image_public_id === 'string'
+        ? before.rows[0].receipt_image_public_id
+        : null
+      const nextPublicId = typeof rows[0].receipt_image_public_id === 'string'
+        ? rows[0].receipt_image_public_id
+        : null
+      if (previousPublicId && previousPublicId !== nextPublicId) {
+        oldReceiptPublicIdToDelete = previousPublicId
+      }
+
       await client.query('COMMIT')
-      return NextResponse.json(rows[0], { status: 201 })
+
+      if (oldReceiptPublicIdToDelete) {
+        await deleteReceiptImage(oldReceiptPublicIdToDelete)
+      }
+
+      return NextResponse.json(rows[0])
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  } catch {
+    return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    await initDb()
+    const auth = await getAuthUser()
+    if (!auth || auth.role !== 'client') {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+    }
+
+    const { id } = await params
+    const expenseId = Number(id)
+    if (!Number.isFinite(expenseId)) {
+      return NextResponse.json({ error: 'Gasto inválido' }, { status: 422 })
+    }
+
+    const client = await pool.connect()
+    let oldReceiptPublicIdToDelete: string | null = null
+    try {
+      await client.query('BEGIN')
+
+      const before = await client.query(
+        `SELECT * FROM construction_expenses WHERE id = $1 AND client_id = $2 LIMIT 1`,
+        [expenseId, auth.sub]
+      )
+      if (before.rowCount === 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Gasto não encontrado' }, { status: 404 })
+      }
+
+      const { rowCount } = await client.query(
+        `DELETE FROM construction_expenses WHERE id = $1 AND client_id = $2`,
+        [expenseId, auth.sub]
+      )
+
+      if (rowCount === 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Gasto não encontrado' }, { status: 404 })
+      }
+
+      await logExpenseAudit({
+        client,
+        expenseId,
+        clientId: Number(auth.sub),
+        actorUserId: Number(auth.sub),
+        action: 'delete',
+        beforeState: before.rows[0],
+      })
+
+      oldReceiptPublicIdToDelete = typeof before.rows[0].receipt_image_public_id === 'string'
+        ? before.rows[0].receipt_image_public_id
+        : null
+
+      await client.query('COMMIT')
+
+      if (oldReceiptPublicIdToDelete) {
+        await deleteReceiptImage(oldReceiptPublicIdToDelete)
+      }
+
+      return new NextResponse(null, { status: 204 })
     } catch (error) {
       await client.query('ROLLBACK')
       throw error

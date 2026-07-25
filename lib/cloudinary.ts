@@ -69,3 +69,12 @@ export async function uploadReceiptImage(params: {
     stream.end(params.buffer)
   })
 }
+
+export async function deleteReceiptImage(publicId: string | null | undefined): Promise<void> {
+  if (!publicId || !isCloudinaryConfigured()) return
+
+  await cloudinary.uploader.destroy(publicId, {
+    resource_type: 'image',
+    invalidate: true,
+  })
+}

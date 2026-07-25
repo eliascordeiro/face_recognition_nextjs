@@ -41,6 +41,39 @@ interface UploadedReceiptMeta {
   height: number | null
 }
 
+interface ExpenseAuditEntry {
+  id: number
+  expense_id: number
+  action: 'create' | 'update' | 'delete'
+  before_state: Record<string, unknown> | null
+  after_state: Record<string, unknown> | null
+  created_at: string
+  actor_user_id: number | null
+  actor_username: string | null
+  actor_full_name: string | null
+  expense_title?: string | null
+}
+
+interface AuditUserOption {
+  value: string
+  label: string
+}
+
+type ExpenseSortOption = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc' | 'title_asc'
+type AuditSortOption = 'recent_desc' | 'recent_asc' | 'action_asc' | 'user_asc'
+
+const EMPTY_FORM = {
+  title: '',
+  category: 'material',
+  amount: '',
+  expenseDate: new Date().toISOString().slice(0, 10),
+  obraId: '',
+  vendorName: '',
+  receiptNumber: '',
+  notes: '',
+  receiptOcrText: '',
+}
+
 const CATEGORY_OPTIONS = [
   { value: 'material', label: 'Material' },
   { value: 'alimentacao', label: 'Alimentação' },
@@ -53,6 +86,124 @@ const CATEGORY_OPTIONS = [
 function formatMoney(cents: number | null | undefined) {
   const value = (cents ?? 0) / 100
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
+}
+
+function getCategoryLabel(value: string) {
+  return CATEGORY_OPTIONS.find((option) => option.value === value)?.label ?? value
+}
+
+function escapeCsv(value: string | number | null | undefined) {
+  const normalized = value == null ? '' : String(value)
+  return `"${normalized.replace(/"/g, '""')}"`
+}
+
+function describeAuditAction(action: ExpenseAuditEntry['action']) {
+  if (action === 'create') return 'Criação'
+  if (action === 'update') return 'Edição'
+  return 'Exclusão'
+}
+
+const AUDIT_FIELD_LABELS: Record<string, string> = {
+  title: 'Descrição',
+  category: 'Categoria',
+  vendor_name: 'Fornecedor',
+  amount_cents: 'Valor',
+  expense_date: 'Data',
+  notes: 'Observações',
+  receipt_number: 'Documento',
+  receipt_total_cents: 'Valor OCR',
+  receipt_ocr_text: 'Texto OCR',
+  obra_id: 'Obra',
+  receipt_image_url: 'Comprovante',
+}
+
+function formatAuditValue(field: string, value: unknown) {
+  if (value == null || value === '') return 'vazio'
+
+  if (field === 'amount_cents' || field === 'receipt_total_cents') {
+    return formatMoney(typeof value === 'number' ? value : Number(value))
+  }
+
+  if (field === 'category') {
+    return getCategoryLabel(String(value))
+  }
+
+  if (field === 'expense_date') {
+    const normalized = String(value)
+    const parsed = new Date(`${normalized}T00:00:00`)
+    return Number.isNaN(parsed.getTime()) ? normalized : parsed.toLocaleDateString('pt-BR')
+  }
+
+  if (field === 'obra_id') {
+    if (value == null || value === '') return 'Sem obra vinculada'
+    return `Obra #${String(value)}`
+  }
+
+  if (field === 'receipt_image_url') {
+    return value ? 'Com comprovante salvo' : 'Sem comprovante'
+  }
+
+  const text = String(value)
+  return text.length > 120 ? `${text.slice(0, 120)}...` : text
+}
+
+function getAuditFieldDiffs(entry: ExpenseAuditEntry) {
+  if (!entry.before_state || !entry.after_state) return []
+
+  return Object.keys(AUDIT_FIELD_LABELS)
+    .filter((key) => JSON.stringify(entry.before_state?.[key] ?? null) !== JSON.stringify(entry.after_state?.[key] ?? null))
+    .map((key) => ({
+      key,
+      label: AUDIT_FIELD_LABELS[key],
+      before: formatAuditValue(key, entry.before_state?.[key]),
+      after: formatAuditValue(key, entry.after_state?.[key]),
+    }))
+}
+
+function getAuditActorLabel(entry: ExpenseAuditEntry) {
+  return entry.actor_full_name || entry.actor_username || 'Usuário não identificado'
+}
+
+function describeChangedFields(entry: ExpenseAuditEntry) {
+  if (!entry.before_state || !entry.after_state) return []
+  return Object.keys(AUDIT_FIELD_LABELS).filter((key) => {
+    const before = entry.before_state?.[key]
+    const after = entry.after_state?.[key]
+    return JSON.stringify(before ?? null) !== JSON.stringify(after ?? null)
+  }).map((key) => AUDIT_FIELD_LABELS[key])
+}
+
+function isExpenseInPeriod(dateValue: string, period: string) {
+  if (period === 'all') return true
+
+  const expenseDate = new Date(`${dateValue}T00:00:00`)
+  if (Number.isNaN(expenseDate.getTime())) return false
+
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+  if (period === '7d') {
+    const start = new Date(today)
+    start.setDate(start.getDate() - 6)
+    return expenseDate >= start && expenseDate <= today
+  }
+
+  if (period === '30d') {
+    const start = new Date(today)
+    start.setDate(start.getDate() - 29)
+    return expenseDate >= start && expenseDate <= today
+  }
+
+  if (period === 'this_month') {
+    return expenseDate.getFullYear() === today.getFullYear() && expenseDate.getMonth() === today.getMonth()
+  }
+
+  if (period === 'last_month') {
+    const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+    return expenseDate.getFullYear() === lastMonth.getFullYear() && expenseDate.getMonth() === lastMonth.getMonth()
+  }
+
+  return true
 }
 
 function inputToApiMoney(value: string) {
@@ -159,17 +310,27 @@ export default function ExpensesPage() {
   const [uploadingReceipt, setUploadingReceipt] = useState(false)
   const [uploadedReceipt, setUploadedReceipt] = useState<UploadedReceiptMeta | null>(null)
   const [ocrSuggestedTotalCents, setOcrSuggestedTotalCents] = useState<number | null>(null)
-  const [form, setForm] = useState({
-    title: '',
-    category: 'material',
-    amount: '',
-    expenseDate: new Date().toISOString().slice(0, 10),
-    obraId: '',
-    vendorName: '',
-    receiptNumber: '',
-    notes: '',
-    receiptOcrText: '',
-  })
+  const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null)
+  const [auditEntriesByExpense, setAuditEntriesByExpense] = useState<Record<number, ExpenseAuditEntry[]>>({})
+  const [recentAuditEntries, setRecentAuditEntries] = useState<ExpenseAuditEntry[]>([])
+  const [auditUserOptions, setAuditUserOptions] = useState<AuditUserOption[]>([])
+  const [expandedAuditExpenseId, setExpandedAuditExpenseId] = useState<number | null>(null)
+  const [auditLoadingExpenseId, setAuditLoadingExpenseId] = useState<number | null>(null)
+  const [recentAuditLoading, setRecentAuditLoading] = useState(true)
+  const [auditActionFilter, setAuditActionFilter] = useState<'all' | ExpenseAuditEntry['action']>('all')
+  const [auditUserFilter, setAuditUserFilter] = useState('all')
+  const [auditPeriodFilter, setAuditPeriodFilter] = useState('30d')
+  const [auditSort, setAuditSort] = useState<AuditSortOption>('recent_desc')
+  const [auditOffset, setAuditOffset] = useState(0)
+  const [auditTotalCount, setAuditTotalCount] = useState(0)
+  const [auditPageSize] = useState(8)
+  const [auditHasMore, setAuditHasMore] = useState(false)
+  const [search, setSearch] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [obraFilter, setObraFilter] = useState('all')
+  const [periodFilter, setPeriodFilter] = useState('this_month')
+  const [expenseSort, setExpenseSort] = useState<ExpenseSortOption>('date_desc')
+  const [form, setForm] = useState(EMPTY_FORM)
 
   useEffect(() => {
     Promise.all([
@@ -182,15 +343,429 @@ export default function ExpensesPage() {
     })
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadAudit(append: boolean) {
+      setRecentAuditLoading(true)
+      const nextOffset = append ? auditOffset : 0
+      const params = new URLSearchParams({
+        action: auditActionFilter,
+        actor: auditUserFilter,
+        period: auditPeriodFilter,
+        limit: String(auditPageSize),
+        offset: String(nextOffset),
+      })
+
+      const res = await fetch(`/api/expenses/audit?${params.toString()}`)
+      const data = await res.json().catch(() => null)
+      if (cancelled) return
+
+      if (!res.ok || !data) {
+        setRecentAuditEntries([])
+        setRecentAuditLoading(false)
+        return
+      }
+
+      const entries = Array.isArray(data.entries) ? data.entries : []
+      setRecentAuditEntries((prev) => (append ? [...prev, ...entries] : entries))
+      setAuditUserOptions(Array.isArray(data.users) ? data.users : [])
+      setAuditTotalCount(typeof data.total === 'number' ? data.total : 0)
+      setAuditHasMore(nextOffset + entries.length < (typeof data.total === 'number' ? data.total : 0))
+      setAuditOffset(nextOffset + entries.length)
+      setRecentAuditLoading(false)
+    }
+
+    loadAudit(false)
+
+    return () => { cancelled = true }
+  }, [auditActionFilter, auditUserFilter, auditPeriodFilter, auditPageSize])
+
   const totalExpenses = useMemo(
     () => expenses.reduce((sum, expense) => sum + expense.amount_cents, 0),
     [expenses]
+  )
+
+  const filteredExpenses = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    const filtered = expenses.filter((expense) => {
+      if (categoryFilter !== 'all' && expense.category !== categoryFilter) return false
+      if (obraFilter !== 'all' && String(expense.obra_id ?? '') !== obraFilter) return false
+      if (!isExpenseInPeriod(expense.expense_date, periodFilter)) return false
+
+      if (!query) return true
+      const haystack = [
+        expense.title,
+        expense.vendor_name ?? '',
+        expense.obra_name ?? '',
+        expense.receipt_number ?? '',
+        expense.notes ?? '',
+      ].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+
+    return [...filtered].sort((left, right) => {
+      if (expenseSort === 'date_desc') {
+        return new Date(right.expense_date).getTime() - new Date(left.expense_date).getTime() || right.id - left.id
+      }
+      if (expenseSort === 'date_asc') {
+        return new Date(left.expense_date).getTime() - new Date(right.expense_date).getTime() || left.id - right.id
+      }
+      if (expenseSort === 'amount_desc') {
+        return right.amount_cents - left.amount_cents || right.id - left.id
+      }
+      if (expenseSort === 'amount_asc') {
+        return left.amount_cents - right.amount_cents || left.id - right.id
+      }
+      return left.title.localeCompare(right.title, 'pt-BR')
+    })
+  }, [expenses, search, categoryFilter, obraFilter, periodFilter, expenseSort])
+
+  const filteredTotal = useMemo(
+    () => filteredExpenses.reduce((sum, expense) => sum + expense.amount_cents, 0),
+    [filteredExpenses]
   )
 
   const withReceiptText = useMemo(
     () => expenses.filter((expense) => expense.receipt_ocr_text && expense.receipt_ocr_text.trim().length > 0).length,
     [expenses]
   )
+
+  const filteredWithImages = useMemo(
+    () => filteredExpenses.filter((expense) => Boolean(expense.receipt_image_url)).length,
+    [filteredExpenses]
+  )
+
+  const categorySummary = useMemo(() => {
+    const grouped = new Map<string, { label: string; count: number; totalCents: number }>()
+    for (const expense of filteredExpenses) {
+      const key = expense.category
+      const current = grouped.get(key) ?? { label: getCategoryLabel(key), count: 0, totalCents: 0 }
+      current.count += 1
+      current.totalCents += expense.amount_cents
+      grouped.set(key, current)
+    }
+    return Array.from(grouped.values()).sort((a, b) => b.totalCents - a.totalCents)
+  }, [filteredExpenses])
+
+  const obraSummary = useMemo(() => {
+    const grouped = new Map<string, { label: string; count: number; totalCents: number }>()
+    for (const expense of filteredExpenses) {
+      const key = String(expense.obra_id ?? 'none')
+      const label = expense.obra_name ?? 'Sem obra vinculada'
+      const current = grouped.get(key) ?? { label, count: 0, totalCents: 0 }
+      current.count += 1
+      current.totalCents += expense.amount_cents
+      grouped.set(key, current)
+    }
+    return Array.from(grouped.values()).sort((a, b) => b.totalCents - a.totalCents)
+  }, [filteredExpenses])
+
+  const recentAuditSummary = useMemo(() => {
+    const grouped = new Map<string, number>()
+    for (const entry of recentAuditEntries) {
+      grouped.set(entry.action, (grouped.get(entry.action) ?? 0) + 1)
+    }
+    return {
+      create: grouped.get('create') ?? 0,
+      update: grouped.get('update') ?? 0,
+      delete: grouped.get('delete') ?? 0,
+    }
+  }, [recentAuditEntries])
+
+  const sortedRecentAuditEntries = useMemo(() => {
+    return [...recentAuditEntries].sort((left, right) => {
+      if (auditSort === 'recent_desc') {
+        return new Date(right.created_at).getTime() - new Date(left.created_at).getTime() || right.id - left.id
+      }
+      if (auditSort === 'recent_asc') {
+        return new Date(left.created_at).getTime() - new Date(right.created_at).getTime() || left.id - right.id
+      }
+      if (auditSort === 'action_asc') {
+        return describeAuditAction(left.action).localeCompare(describeAuditAction(right.action), 'pt-BR')
+      }
+      return getAuditActorLabel(left).localeCompare(getAuditActorLabel(right), 'pt-BR')
+    })
+  }, [recentAuditEntries, auditSort])
+
+  async function loadMoreAuditEntries() {
+    setRecentAuditLoading(true)
+    const params = new URLSearchParams({
+      action: auditActionFilter,
+      actor: auditUserFilter,
+      period: auditPeriodFilter,
+      limit: String(auditPageSize),
+      offset: String(auditOffset),
+    })
+
+    const res = await fetch(`/api/expenses/audit?${params.toString()}`)
+    const data = await res.json().catch(() => null)
+    if (!res.ok || !data) {
+      setRecentAuditLoading(false)
+      return
+    }
+
+    const entries = Array.isArray(data.entries) ? data.entries : []
+    setRecentAuditEntries((prev) => [...prev, ...entries])
+    setAuditTotalCount(typeof data.total === 'number' ? data.total : 0)
+    setAuditHasMore(auditOffset + entries.length < (typeof data.total === 'number' ? data.total : 0))
+    setAuditOffset(auditOffset + entries.length)
+    setRecentAuditLoading(false)
+  }
+
+  function exportAuditCsv() {
+    const headers = [
+      'DataHora',
+      'Acao',
+      'Gasto',
+      'Usuario',
+      'Campos alterados',
+    ]
+
+    const lines = recentAuditEntries.map((entry) => [
+      new Date(entry.created_at).toLocaleString('pt-BR'),
+      describeAuditAction(entry.action),
+      entry.expense_title || (entry.expense_id ? `Gasto #${entry.expense_id}` : 'Gasto removido'),
+      getAuditActorLabel(entry),
+      describeChangedFields(entry).join(', '),
+    ])
+
+    const csv = [headers, ...lines]
+      .map((row) => row.map((cell) => escapeCsv(cell)).join(';'))
+      .join('\n')
+
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const dateLabel = new Date().toISOString().slice(0, 10)
+    link.href = url
+    link.download = `auditoria-gastos-${auditPeriodFilter}-${dateLabel}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  async function exportAuditPdf() {
+    const [{ jsPDF }, autoTableModule] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ])
+    const autoTable = autoTableModule.default
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+
+    doc.setFillColor(15, 23, 42)
+    doc.rect(0, 0, 595, 100, 'F')
+    doc.setTextColor(248, 250, 252)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(20)
+    doc.text('Auditoria de Gastos', 40, 42)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, 40, 64)
+    doc.text(`Cliente: ${auth?.fullName || auth?.username || 'Cliente'}`, 40, 80)
+
+    autoTable(doc, {
+      startY: 120,
+      theme: 'grid',
+      headStyles: { fillColor: [37, 99, 235] },
+      head: [['Indicador', 'Valor']],
+      body: [
+        ['Entradas carregadas', String(recentAuditEntries.length)],
+        ['Total no recorte', String(auditTotalCount)],
+        ['Criações (carregadas)', String(recentAuditSummary.create)],
+        ['Edições (carregadas)', String(recentAuditSummary.update)],
+        ['Exclusões (carregadas)', String(recentAuditSummary.delete)],
+      ],
+    })
+
+    autoTable(doc, {
+      startY: (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ? ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18) : 220,
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 4 },
+      headStyles: { fillColor: [30, 41, 59] },
+      head: [['Data/Hora', 'Ação', 'Gasto', 'Usuário', 'Campos alterados']],
+      body: recentAuditEntries.length > 0
+        ? recentAuditEntries.map((entry) => [
+            new Date(entry.created_at).toLocaleString('pt-BR'),
+            describeAuditAction(entry.action),
+            entry.expense_title || (entry.expense_id ? `Gasto #${entry.expense_id}` : 'Gasto removido'),
+            getAuditActorLabel(entry),
+            describeChangedFields(entry).join(', ') || '-',
+          ])
+        : [['-', '-', 'Sem atividade no recorte', '-', '-']],
+    })
+
+    const dateLabel = new Date().toISOString().slice(0, 10)
+    doc.save(`auditoria-gastos-${auditPeriodFilter}-${dateLabel}.pdf`)
+  }
+
+  function exportFilteredExpensesCsv() {
+    const headers = [
+      'Data',
+      'Descricao',
+      'Categoria',
+      'Obra',
+      'Fornecedor',
+      'Valor',
+      'Documento',
+      'Valor OCR',
+      'Status OCR',
+      'Comprovante URL',
+      'Observacoes',
+    ]
+
+    const lines = filteredExpenses.map((expense) => [
+      expense.expense_date,
+      expense.title,
+      CATEGORY_OPTIONS.find((option) => option.value === expense.category)?.label ?? expense.category,
+      expense.obra_name ?? 'Sem obra vinculada',
+      expense.vendor_name ?? '',
+      (expense.amount_cents / 100).toFixed(2).replace('.', ','),
+      expense.receipt_number ?? '',
+      expense.receipt_total_cents != null ? (expense.receipt_total_cents / 100).toFixed(2).replace('.', ',') : '',
+      expense.ocr_status,
+      expense.receipt_image_url ?? '',
+      expense.notes ?? '',
+    ])
+
+    const csv = [headers, ...lines]
+      .map((row) => row.map((cell) => escapeCsv(cell)).join(';'))
+      .join('\n')
+
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const dateLabel = new Date().toISOString().slice(0, 10)
+    link.href = url
+    link.download = `gastos-${periodFilter}-${dateLabel}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  async function exportFilteredExpensesPdf() {
+    const [{ jsPDF }, autoTableModule] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ])
+    const autoTable = autoTableModule.default
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+
+    const generatedAt = new Date().toLocaleString('pt-BR')
+    doc.setFillColor(15, 23, 42)
+    doc.rect(0, 0, 595, 110, 'F')
+    doc.setTextColor(248, 250, 252)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(22)
+    doc.text('Relatorio de Gastos', 40, 44)
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`Gerado em ${generatedAt}`, 40, 66)
+    doc.text(`Cliente: ${auth?.fullName || auth?.username || 'Cliente'}`, 40, 84)
+
+    doc.setTextColor(51, 65, 85)
+    doc.setFontSize(10)
+    doc.text(`Filtros: periodo=${periodFilter} | categoria=${categoryFilter} | obra=${obraFilter} | busca=${search || 'sem filtro textual'}`, 40, 132)
+
+    autoTable(doc, {
+      startY: 148,
+      theme: 'grid',
+      headStyles: { fillColor: [245, 158, 11], textColor: [15, 23, 42] },
+      bodyStyles: { textColor: [30, 41, 59] },
+      head: [['Indicador', 'Valor']],
+      body: [
+        ['Lancamentos no recorte', String(filteredExpenses.length)],
+        ['Total filtrado', formatMoney(filteredTotal)],
+        ['Com comprovante', String(filteredWithImages)],
+        ['Com OCR', String(withReceiptText)],
+      ],
+    })
+
+    autoTable(doc, {
+      startY: (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ? ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18) : 260,
+      theme: 'striped',
+      headStyles: { fillColor: [14, 116, 144] },
+      head: [['Resumo por categoria', 'Lancamentos', 'Total']],
+      body: categorySummary.length > 0
+        ? categorySummary.map((item) => [item.label, String(item.count), formatMoney(item.totalCents)])
+        : [['Sem dados', '0', formatMoney(0)]],
+    })
+
+    autoTable(doc, {
+      startY: (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ? ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18) : 360,
+      theme: 'striped',
+      headStyles: { fillColor: [5, 150, 105] },
+      head: [['Resumo por obra', 'Lancamentos', 'Total']],
+      body: obraSummary.length > 0
+        ? obraSummary.map((item) => [item.label, String(item.count), formatMoney(item.totalCents)])
+        : [['Sem dados', '0', formatMoney(0)]],
+    })
+
+    autoTable(doc, {
+      startY: (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ? ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18) : 460,
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 4 },
+      headStyles: { fillColor: [30, 41, 59] },
+      head: [['Data', 'Descricao', 'Categoria', 'Obra', 'Fornecedor', 'Valor', 'Documento']],
+      body: filteredExpenses.length > 0
+        ? filteredExpenses.map((expense) => [
+            new Date(`${expense.expense_date}T00:00:00`).toLocaleDateString('pt-BR'),
+            expense.title,
+            getCategoryLabel(expense.category),
+            expense.obra_name ?? 'Sem obra',
+            expense.vendor_name ?? '-',
+            formatMoney(expense.amount_cents),
+            expense.receipt_number ?? '-',
+          ])
+        : [['-', 'Nenhum gasto no recorte', '-', '-', '-', '-', '-']],
+    })
+
+    const dateLabel = new Date().toISOString().slice(0, 10)
+    doc.save(`relatorio-gastos-${periodFilter}-${dateLabel}.pdf`)
+  }
+
+  function resetForm() {
+    setForm({ ...EMPTY_FORM, expenseDate: new Date().toISOString().slice(0, 10) })
+    setEditingExpenseId(null)
+    setReceiptImage(null)
+    setReceiptImagePreview(null)
+    setUploadedReceipt(null)
+    setOcrSuggestedTotalCents(null)
+    setOcrMessage(null)
+    setOcrProgress(0)
+    setError(null)
+  }
+
+  function startEditing(expense: Expense) {
+    setEditingExpenseId(expense.id)
+    setForm({
+      title: expense.title,
+      category: expense.category,
+      amount: centsToInputMoney(expense.amount_cents),
+      expenseDate: expense.expense_date,
+      obraId: expense.obra_id ? String(expense.obra_id) : '',
+      vendorName: expense.vendor_name ?? '',
+      receiptNumber: expense.receipt_number ?? '',
+      notes: expense.notes ?? '',
+      receiptOcrText: expense.receipt_ocr_text ?? '',
+    })
+    setUploadedReceipt(expense.receipt_image_url ? {
+      url: expense.receipt_image_url,
+      publicId: expense.receipt_image_public_id ?? '',
+      format: expense.receipt_image_format,
+      bytes: expense.receipt_image_bytes,
+      width: expense.receipt_image_width,
+      height: expense.receipt_image_height,
+    } : null)
+    setReceiptImage(null)
+    setReceiptImagePreview(expense.receipt_image_url)
+    setOcrSuggestedTotalCents(expense.receipt_total_cents)
+    setOcrMessage(null)
+    setOcrProgress(0)
+    setError(null)
+  }
 
   function handleReceiptFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null
@@ -335,8 +910,9 @@ export default function ExpensesPage() {
       receiptOcrText: form.receiptOcrText,
     }
 
-    const res = await fetch('/api/expenses', {
-      method: 'POST',
+    const isEditing = editingExpenseId !== null
+    const res = await fetch(isEditing ? `/api/expenses/${editingExpenseId}` : '/api/expenses', {
+      method: isEditing ? 'PATCH' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
@@ -349,23 +925,65 @@ export default function ExpensesPage() {
     }
 
     const obraName = obras.find((obra) => obra.id === data.obra_id)?.name ?? null
-    setExpenses((prev) => [{ ...data, obra_name: obraName }, ...prev])
-    setForm((prev) => ({
-      ...prev,
-      title: '',
-      amount: '',
-      vendorName: '',
-      receiptNumber: '',
-      notes: '',
-      receiptOcrText: '',
-      obraId: '',
-    }))
-    setReceiptImage(null)
-    setReceiptImagePreview(null)
-    setUploadedReceipt(null)
-    setOcrSuggestedTotalCents(null)
-    setOcrMessage(null)
-    setOcrProgress(0)
+    if (isEditing) {
+      setExpenses((prev) => prev.map((expense) => (
+        expense.id === data.id ? { ...expense, ...data, obra_name: obraName } : expense
+      )))
+    } else {
+      setExpenses((prev) => [{ ...data, obra_name: obraName }, ...prev])
+    }
+    resetForm()
+  }
+
+  async function deleteExpense(expense: Expense) {
+    if (!confirm(`Remover o gasto "${expense.title}"? Essa ação não pode ser desfeita.`)) return
+
+    const res = await fetch(`/api/expenses/${expense.id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Falha ao remover gasto' }))
+      setError(data.error ?? 'Falha ao remover gasto')
+      return
+    }
+
+    setExpenses((prev) => prev.filter((item) => item.id !== expense.id))
+    setRecentAuditEntries((prev) => prev.filter((entry) => entry.expense_id !== expense.id || entry.action !== 'delete'))
+    if (editingExpenseId === expense.id) {
+      resetForm()
+    }
+    setAuditEntriesByExpense((prev) => {
+      const next = { ...prev }
+      delete next[expense.id]
+      return next
+    })
+    if (expandedAuditExpenseId === expense.id) {
+      setExpandedAuditExpenseId(null)
+    }
+  }
+
+  async function toggleAuditHistory(expenseId: number) {
+    if (expandedAuditExpenseId === expenseId) {
+      setExpandedAuditExpenseId(null)
+      return
+    }
+
+    setExpandedAuditExpenseId(expenseId)
+    if (auditEntriesByExpense[expenseId]) return
+
+    setAuditLoadingExpenseId(expenseId)
+    try {
+      const res = await fetch(`/api/expenses/${expenseId}/audit`)
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Falha ao carregar auditoria')
+      }
+      setAuditEntriesByExpense((prev) => ({ ...prev, [expenseId]: Array.isArray(data) ? data : [] }))
+    } catch (auditError) {
+      const message = auditError instanceof Error ? auditError.message : 'Falha ao carregar auditoria'
+      setError(message)
+      setExpandedAuditExpenseId(null)
+    } finally {
+      setAuditLoadingExpenseId(null)
+    }
   }
 
   return (
@@ -387,26 +1005,248 @@ export default function ExpensesPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 min-w-full lg:min-w-[420px]">
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
-              <p className="text-xs uppercase tracking-widest text-slate-500">Lançamentos</p>
-              <p className="mt-2 text-2xl font-bold text-white">{loading ? '…' : expenses.length}</p>
+              <p className="text-xs uppercase tracking-widest text-slate-500">No recorte</p>
+              <p className="mt-2 text-2xl font-bold text-white">{loading ? '…' : filteredExpenses.length}</p>
+              <p className="mt-1 text-xs text-slate-500">Total geral: {expenses.length}</p>
             </div>
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
-              <p className="text-xs uppercase tracking-widest text-slate-500">Total registrado</p>
-              <p className="mt-2 text-2xl font-bold text-emerald-400">{loading ? '…' : formatMoney(totalExpenses)}</p>
+              <p className="text-xs uppercase tracking-widest text-slate-500">Total filtrado</p>
+              <p className="mt-2 text-2xl font-bold text-emerald-400">{loading ? '…' : formatMoney(filteredTotal)}</p>
+              <p className="mt-1 text-xs text-slate-500">Total geral: {formatMoney(totalExpenses)}</p>
             </div>
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
-              <p className="text-xs uppercase tracking-widest text-slate-500">Prontos para OCR</p>
-              <p className="mt-2 text-2xl font-bold text-amber-300">{loading ? '…' : withReceiptText}</p>
+              <p className="text-xs uppercase tracking-widest text-slate-500">Com comprovante</p>
+              <p className="mt-2 text-2xl font-bold text-amber-300">{loading ? '…' : filteredWithImages}</p>
+              <p className="mt-1 text-xs text-slate-500">Com OCR: {withReceiptText}</p>
             </div>
           </div>
         </div>
       </section>
 
+      <section className="rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">Filtros e análise</h2>
+            <p className="text-sm text-slate-400">Refine os gastos por obra, categoria, período ou texto livre.</p>
+          </div>
+          <button
+            type="button"
+            onClick={exportFilteredExpensesCsv}
+            disabled={filteredExpenses.length === 0}
+            className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:border-emerald-400 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Exportar CSV do recorte
+          </button>
+          <button
+            type="button"
+            onClick={exportFilteredExpensesPdf}
+            disabled={filteredExpenses.length === 0}
+            className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-200 transition hover:border-sky-400 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Exportar PDF do recorte
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-300">Busca</label>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Descrição, fornecedor, obra..."
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-400"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-300">Categoria</label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-400"
+            >
+              <option value="all">Todas</option>
+              {CATEGORY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-300">Obra</label>
+            <select
+              value={obraFilter}
+              onChange={(e) => setObraFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-400"
+            >
+              <option value="all">Todas as obras</option>
+              <option value="">Sem obra vinculada</option>
+              {obras.map((obra) => (
+                <option key={obra.id} value={String(obra.id)}>{obra.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-300">Período</label>
+            <select
+              value={periodFilter}
+              onChange={(e) => setPeriodFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-400"
+            >
+              <option value="all">Todo o histórico</option>
+              <option value="7d">Últimos 7 dias</option>
+              <option value="30d">Últimos 30 dias</option>
+              <option value="this_month">Este mês</option>
+              <option value="last_month">Mês anterior</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">Atividade recente da auditoria</h2>
+            <p className="text-sm text-slate-400">Visão geral das últimas alterações financeiras do cliente.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={exportAuditCsv}
+              disabled={recentAuditEntries.length === 0}
+              className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:border-emerald-400 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Exportar auditoria CSV
+            </button>
+            <button
+              type="button"
+              onClick={exportAuditPdf}
+              disabled={recentAuditEntries.length === 0}
+              className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-200 transition hover:border-sky-400 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Exportar auditoria PDF
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wider text-slate-500">Criações</p>
+              <p className="text-lg font-semibold text-emerald-300">{recentAuditSummary.create}</p>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wider text-slate-500">Edições</p>
+              <p className="text-lg font-semibold text-amber-300">{recentAuditSummary.update}</p>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wider text-slate-500">Exclusões</p>
+              <p className="text-lg font-semibold text-red-300">{recentAuditSummary.delete}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-300">Ação</label>
+            <select
+              value={auditActionFilter}
+              onChange={(e) => setAuditActionFilter(e.target.value as 'all' | ExpenseAuditEntry['action'])}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
+            >
+              <option value="all">Todas</option>
+              <option value="create">Criação</option>
+              <option value="update">Edição</option>
+              <option value="delete">Exclusão</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-300">Usuário</label>
+            <select
+              value={auditUserFilter}
+              onChange={(e) => setAuditUserFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
+            >
+              <option value="all">Todos</option>
+              {auditUserOptions.map((user) => (
+                <option key={user.value} value={user.value}>{user.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-300">Período</label>
+            <select
+              value={auditPeriodFilter}
+              onChange={(e) => setAuditPeriodFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
+            >
+              <option value="all">Todo o histórico carregado</option>
+              <option value="7d">Últimos 7 dias</option>
+              <option value="30d">Últimos 30 dias</option>
+              <option value="this_month">Este mês</option>
+              <option value="last_month">Mês anterior</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-300">Ordenação</label>
+            <select
+              value={auditSort}
+              onChange={(e) => setAuditSort(e.target.value as AuditSortOption)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
+            >
+              <option value="recent_desc">Mais recentes primeiro</option>
+              <option value="recent_asc">Mais antigas primeiro</option>
+              <option value="action_asc">Ação (A-Z)</option>
+              <option value="user_asc">Usuário (A-Z)</option>
+            </select>
+          </div>
+        </div>
+
+        {recentAuditLoading ? (
+          <p className="text-sm text-slate-400">Carregando atividade recente...</p>
+        ) : recentAuditEntries.length === 0 ? (
+          <p className="text-sm text-slate-500">Ainda não há atividade auditada para exibir.</p>
+        ) : (
+          <div className="space-y-3">
+            {sortedRecentAuditEntries.map((entry) => (
+              <div key={entry.id} className="rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-slate-100">
+                      {describeAuditAction(entry.action)}
+                      {entry.expense_title ? ` · ${entry.expense_title}` : entry.expense_id ? ` · Gasto #${entry.expense_id}` : ''}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {new Date(entry.created_at).toLocaleString('pt-BR')}
+                      {entry.actor_full_name || entry.actor_username ? ` · ${entry.actor_full_name || entry.actor_username}` : ''}
+                    </p>
+                  </div>
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                    entry.action === 'create'
+                      ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/20'
+                      : entry.action === 'update'
+                        ? 'bg-amber-500/15 text-amber-200 border border-amber-400/20'
+                        : 'bg-red-500/15 text-red-200 border border-red-400/20'
+                  }`}>
+                    {describeAuditAction(entry.action)}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {auditHasMore && (
+              <button
+                type="button"
+                onClick={loadMoreAuditEntries}
+                disabled={recentAuditLoading}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-3 text-sm font-medium text-slate-200 transition hover:border-sky-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {recentAuditLoading ? 'Carregando...' : `Carregar mais (${recentAuditEntries.length}/${auditTotalCount})`}
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+
       <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_1.35fr] gap-6">
         <section className="rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
           <div className="mb-4">
-            <h2 className="text-lg font-semibold text-slate-100">Novo gasto</h2>
-            <p className="text-sm text-slate-400">Agora o sistema já consegue ler a foto do comprovante no navegador e sugerir o valor total.</p>
+            <h2 className="text-lg font-semibold text-slate-100">{editingExpenseId ? 'Editar gasto' : 'Novo gasto'}</h2>
+            <p className="text-sm text-slate-400">Agora o sistema já consegue ler a foto do comprovante no navegador, sugerir o valor total e também atualizar lançamentos existentes.</p>
           </div>
 
           <form onSubmit={submitExpense} className="space-y-4">
@@ -447,6 +1287,9 @@ export default function ExpensesPage() {
 
                   {ocrMessage && <p className="text-sm text-slate-300">{ocrMessage}</p>}
                   {uploadingReceipt && <p className="text-sm text-sky-300">Enviando comprovante para storage...</p>}
+                  {editingExpenseId && uploadedReceipt?.url && !receiptImage && (
+                    <p className="text-sm text-emerald-300">Este gasto já possui um comprovante salvo. Escolha outra imagem para substituir.</p>
+                  )}
                   <p className="text-xs text-slate-500">
                     Fluxo atual: a imagem é lida no navegador, o texto é extraído e o gestor confirma os campos antes de salvar.
                   </p>
@@ -575,13 +1418,24 @@ export default function ExpensesPage() {
 
             {error && <p className="text-sm text-red-400">{error}</p>}
 
-            <button
-              type="submit"
-              disabled={saving}
-              className="w-full rounded-lg bg-amber-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? 'Salvando...' : 'Registrar gasto'}
-            </button>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex-1 rounded-lg bg-amber-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving ? 'Salvando...' : editingExpenseId ? 'Salvar alterações' : 'Registrar gasto'}
+              </button>
+              {editingExpenseId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="rounded-lg border border-slate-600 px-4 py-3 text-sm font-medium text-slate-200 transition hover:border-slate-400 hover:text-white"
+                >
+                  Cancelar edição
+                </button>
+              )}
+            </div>
           </form>
         </section>
 
@@ -589,7 +1443,21 @@ export default function ExpensesPage() {
           <div className="mb-4 flex items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold text-slate-100">Lançamentos recentes</h2>
-              <p className="text-sm text-slate-400">Histórico pronto para evoluir para foto + OCR + conferência humana.</p>
+              <p className="text-sm text-slate-400">Histórico com filtros, OCR e acesso rápido ao comprovante salvo.</p>
+            </div>
+            <div className="w-full max-w-xs">
+              <label className="mb-1.5 block text-sm text-slate-300">Ordenação</label>
+              <select
+                value={expenseSort}
+                onChange={(e) => setExpenseSort(e.target.value as ExpenseSortOption)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-400"
+              >
+                <option value="date_desc">Data mais recente</option>
+                <option value="date_asc">Data mais antiga</option>
+                <option value="amount_desc">Maior valor</option>
+                <option value="amount_asc">Menor valor</option>
+                <option value="title_asc">Descrição (A-Z)</option>
+              </select>
             </div>
           </div>
 
@@ -599,17 +1467,37 @@ export default function ExpensesPage() {
                 <div key={index} className="h-24 animate-pulse rounded-xl border border-slate-700 bg-slate-900/60" />
               ))}
             </div>
-          ) : expenses.length === 0 ? (
+          ) : filteredExpenses.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center">
-              <p className="text-slate-300 font-medium">Nenhum gasto registrado ainda.</p>
-              <p className="mt-2 text-sm text-slate-500">A primeira fase já organiza os lançamentos. A segunda conecta a foto do comprovante ao OCR.</p>
+              <p className="text-slate-300 font-medium">Nenhum gasto encontrado para os filtros atuais.</p>
+              <p className="mt-2 text-sm text-slate-500">Ajuste o período, a obra, a categoria ou a busca para ampliar o recorte.</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {expenses.map((expense) => (
+              {filteredExpenses.map((expense) => (
                 <article key={expense.id} className="rounded-xl border border-slate-700 bg-slate-900/65 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="flex gap-4">
+                      {expense.receipt_image_url ? (
+                        <a
+                          href={expense.receipt_image_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block h-24 w-24 flex-shrink-0 overflow-hidden rounded-xl border border-slate-700 bg-slate-950/70 transition hover:border-sky-400"
+                        >
+                          <img
+                            src={expense.receipt_image_url}
+                            alt={`Comprovante de ${expense.title}`}
+                            className="h-full w-full object-cover"
+                          />
+                        </a>
+                      ) : (
+                        <div className="flex h-24 w-24 flex-shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-950/70 text-center text-[11px] text-slate-500">
+                          Sem imagem
+                        </div>
+                      )}
+
+                      <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-semibold text-slate-100">{expense.title}</h3>
                         <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-amber-200">
@@ -630,8 +1518,15 @@ export default function ExpensesPage() {
                         {expense.receipt_number ? ` · Documento: ${expense.receipt_number}` : ''}
                         {expense.receipt_uploaded_at ? ` · Imagem salva` : ''}
                       </p>
+                      {expense.receipt_image_bytes && (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Arquivo: {(expense.receipt_image_bytes / 1024).toFixed(0)} KB
+                          {expense.receipt_image_width && expense.receipt_image_height ? ` · ${expense.receipt_image_width}x${expense.receipt_image_height}` : ''}
+                        </p>
+                      )}
+                      </div>
                     </div>
-                    <div className="text-left sm:text-right">
+                    <div className="text-left lg:text-right">
                       <p className="text-xl font-bold text-emerald-400">{formatMoney(expense.amount_cents)}</p>
                       {expense.receipt_total_cents !== null && (
                         <p className="text-xs text-slate-500">OCR sugeriu {formatMoney(expense.receipt_total_cents)}</p>
@@ -658,14 +1553,128 @@ export default function ExpensesPage() {
 
                   {expense.receipt_image_url && (
                     <div className="mt-3">
-                      <a
-                        href={expense.receipt_image_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-sky-300 transition hover:border-sky-400 hover:text-sky-200"
+                      <div className="flex flex-wrap gap-2">
+                        <a
+                          href={expense.receipt_image_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-sky-300 transition hover:border-sky-400 hover:text-sky-200"
+                        >
+                          Ver comprovante salvo
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => startEditing(expense)}
+                          className="rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-200 transition hover:border-amber-400 hover:text-white"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteExpense(expense)}
+                          className="rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200 transition hover:border-red-500 hover:text-white"
+                        >
+                          Excluir
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleAuditHistory(expense.id)}
+                          className="rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-200 transition hover:border-sky-400 hover:text-white"
+                        >
+                          {expandedAuditExpenseId === expense.id ? 'Ocultar histórico' : 'Ver histórico'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {!expense.receipt_image_url && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => startEditing(expense)}
+                        className="rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-200 transition hover:border-amber-400 hover:text-white"
                       >
-                        Ver comprovante salvo
-                      </a>
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteExpense(expense)}
+                        className="rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200 transition hover:border-red-500 hover:text-white"
+                      >
+                        Excluir
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleAuditHistory(expense.id)}
+                        className="rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-200 transition hover:border-sky-400 hover:text-white"
+                      >
+                        {expandedAuditExpenseId === expense.id ? 'Ocultar histórico' : 'Ver histórico'}
+                      </button>
+                    </div>
+                  )}
+
+                  {expandedAuditExpenseId === expense.id && (
+                    <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-100">Histórico de auditoria</p>
+                          <p className="text-xs text-slate-500">Criação, edição e exclusão com snapshots do estado do gasto.</p>
+                        </div>
+                      </div>
+
+                      {auditLoadingExpenseId === expense.id ? (
+                        <p className="text-sm text-slate-400">Carregando histórico...</p>
+                      ) : (auditEntriesByExpense[expense.id]?.length ?? 0) === 0 ? (
+                        <p className="text-sm text-slate-500">Nenhum registro de auditoria encontrado.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {auditEntriesByExpense[expense.id].map((entry) => {
+                            const changedFields = describeChangedFields(entry)
+                            const diffs = getAuditFieldDiffs(entry)
+                            return (
+                              <div key={entry.id} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-100">{describeAuditAction(entry.action)}</p>
+                                    <p className="text-xs text-slate-500">
+                                      {new Date(entry.created_at).toLocaleString('pt-BR')}
+                                      {entry.actor_full_name || entry.actor_username ? ` · ${entry.actor_full_name || entry.actor_username}` : ''}
+                                    </p>
+                                  </div>
+                                  {changedFields.length > 0 && (
+                                    <p className="text-xs text-sky-300">Campos alterados: {changedFields.join(', ')}</p>
+                                  )}
+                                </div>
+
+                                {entry.action === 'create' && entry.after_state && (
+                                  <p className="mt-2 text-xs text-slate-400">Snapshot salvo da criação do gasto.</p>
+                                )}
+                                {entry.action === 'delete' && entry.before_state && (
+                                  <p className="mt-2 text-xs text-slate-400">Snapshot salvo antes da exclusão.</p>
+                                )}
+                                {diffs.length > 0 && (
+                                  <div className="mt-3 space-y-2 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                                    <p className="text-xs font-medium uppercase tracking-widest text-slate-400">Antes e depois</p>
+                                    {diffs.map((diff) => (
+                                      <div key={diff.key} className="grid gap-2 md:grid-cols-[140px_1fr_1fr] md:items-start">
+                                        <p className="text-xs font-medium text-slate-300">{diff.label}</p>
+                                        <div className="rounded-md border border-red-900/40 bg-red-950/20 px-2 py-1.5 text-xs text-red-100">
+                                          <p className="mb-1 uppercase tracking-wider text-[10px] text-red-300">Antes</p>
+                                          <p className="whitespace-pre-wrap break-words">{diff.before}</p>
+                                        </div>
+                                        <div className="rounded-md border border-emerald-900/40 bg-emerald-950/20 px-2 py-1.5 text-xs text-emerald-100">
+                                          <p className="mb-1 uppercase tracking-wider text-[10px] text-emerald-300">Depois</p>
+                                          <p className="whitespace-pre-wrap break-words">{diff.after}</p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </article>

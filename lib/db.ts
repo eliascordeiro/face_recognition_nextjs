@@ -225,6 +225,28 @@ export async function initDb(): Promise<void> {
     await client.query(`CREATE INDEX IF NOT EXISTS construction_expenses_client_idx ON construction_expenses (client_id, expense_date DESC, id DESC)`)
     await client.query(`CREATE INDEX IF NOT EXISTS construction_expenses_obra_idx ON construction_expenses (obra_id, expense_date DESC)`)
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS construction_expense_audit (
+        id SERIAL PRIMARY KEY,
+        expense_id INTEGER,
+        client_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        action VARCHAR(20) NOT NULL,
+        before_state JSONB,
+        after_state JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `)
+    await client.query(`ALTER TABLE construction_expense_audit ADD COLUMN IF NOT EXISTS expense_id INTEGER`)
+    await client.query(`ALTER TABLE construction_expense_audit ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE construction_expense_audit ADD COLUMN IF NOT EXISTS actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE construction_expense_audit ADD COLUMN IF NOT EXISTS action VARCHAR(20)`)
+    await client.query(`ALTER TABLE construction_expense_audit ADD COLUMN IF NOT EXISTS before_state JSONB`)
+    await client.query(`ALTER TABLE construction_expense_audit ADD COLUMN IF NOT EXISTS after_state JSONB`)
+    await client.query(`ALTER TABLE construction_expense_audit ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`)
+    await client.query(`CREATE INDEX IF NOT EXISTS construction_expense_audit_client_idx ON construction_expense_audit (client_id, created_at DESC)`)
+    await client.query(`CREATE INDEX IF NOT EXISTS construction_expense_audit_expense_idx ON construction_expense_audit (expense_id, created_at DESC)`)
+
     await client.query(`UPDATE construction_expenses SET title = 'Gasto sem descrição' WHERE title IS NULL OR BTRIM(title) = ''`)
     await client.query(`UPDATE construction_expenses SET amount_cents = 0 WHERE amount_cents IS NULL`)
     await client.query(`ALTER TABLE construction_expenses ALTER COLUMN title SET NOT NULL`)
