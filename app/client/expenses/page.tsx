@@ -277,6 +277,22 @@ function extractReceiptInsights(rawText: string) {
   }
 }
 
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedValue(value)
+    }, delayMs)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [value, delayMs])
+
+  return debouncedValue
+}
+
 export default function ExpensesPage() {
   const auth = useClientAuth()
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -321,6 +337,8 @@ export default function ExpensesPage() {
   const [periodFilter, setPeriodFilter] = useState('this_month')
   const [expenseSort, setExpenseSort] = useState<ExpenseSortOption>('date_desc')
   const [form, setForm] = useState(EMPTY_FORM)
+  const debouncedSearch = useDebouncedValue(search, 350)
+  const debouncedAuditSearch = useDebouncedValue(auditSearch, 350)
 
   useEffect(() => {
     let cancelled = false
@@ -339,7 +357,7 @@ export default function ExpensesPage() {
     async function loadExpensesPage() {
       setLoading(true)
       const params = new URLSearchParams({
-        q: search.trim(),
+        q: debouncedSearch.trim(),
         category: categoryFilter,
         obra: obraFilter === '' ? 'none' : obraFilter,
         period: periodFilter,
@@ -379,7 +397,7 @@ export default function ExpensesPage() {
     loadExpensesPage()
 
     return () => { cancelled = true }
-  }, [search, categoryFilter, obraFilter, periodFilter, expenseSort, expensePageSize, expenseRefreshToken])
+  }, [debouncedSearch, categoryFilter, obraFilter, periodFilter, expenseSort, expensePageSize, expenseRefreshToken])
 
   useEffect(() => {
     let cancelled = false
@@ -391,7 +409,7 @@ export default function ExpensesPage() {
         action: auditActionFilter,
         actor: auditUserFilter,
         period: auditPeriodFilter,
-        q: auditSearch,
+        q: debouncedAuditSearch,
         limit: String(auditPageSize),
         offset: String(nextOffset),
       })
@@ -418,7 +436,7 @@ export default function ExpensesPage() {
     loadAudit(false)
 
     return () => { cancelled = true }
-  }, [auditActionFilter, auditUserFilter, auditPeriodFilter, auditSearch, auditPageSize])
+  }, [auditActionFilter, auditUserFilter, auditPeriodFilter, debouncedAuditSearch, auditPageSize])
 
   const filteredExpenses = expenses
 
@@ -484,7 +502,7 @@ export default function ExpensesPage() {
 
     setExpenseLoadingMore(true)
     const params = new URLSearchParams({
-      q: search.trim(),
+      q: debouncedSearch.trim(),
       category: categoryFilter,
       obra: obraFilter === '' ? 'none' : obraFilter,
       period: periodFilter,
@@ -520,7 +538,7 @@ export default function ExpensesPage() {
       action: auditActionFilter,
       actor: auditUserFilter,
       period: auditPeriodFilter,
-      q: auditSearch,
+      q: debouncedAuditSearch,
       limit: String(auditPageSize),
       offset: String(auditOffset),
     })
