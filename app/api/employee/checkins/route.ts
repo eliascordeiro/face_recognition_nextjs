@@ -2,6 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
 import { getCheckinMaxDistanceMeters, haversineDistanceMeters } from '@/lib/geo'
+import { isValidEmail, normalizeEmail } from '@/lib/security'
+
+const FACE_THRESHOLD = Number(process.env.ATTENDANCE_FACE_MAX_DISTANCE ?? 0.55)
+
+function parseEmbedding(raw: unknown): number[] {
+  if (!Array.isArray(raw) || raw.length !== 128) {
+    throw new Error('embedding deve ser um array de 128 números')
+  }
+  if (!raw.every((v) => typeof v === 'number' && isFinite(v))) {
+    throw new Error('embedding contém valores não numéricos')
+  }
+  return raw as number[]
+}
 
 function toNumericOrNull(value: unknown) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
@@ -63,7 +76,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>
     const lat = toNumericOrNull(body.lat)
     const lng = toNumericOrNull(body.lng)
+    const email = normalizeEmail(String(body.email ?? ''))
+    const faceEmbedding = parseEmbedding(body.embedding)
     const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 500) || null : null
+
+    if (!auth.email) {
+      return NextResponse.json({ error: 'Sessão sem e-mail vinculado. Faça login novamente.' }, { status: 401 })
+    }
+    if (!isValidEmail(email) || email !== normalizeEmail(auth.email)) {
+      return NextResponse.json({ error: 'Confirmação de e-mail inválida para esta sessão.' }, { status: 403 })
+    }
 
     if (!auth.obraId) {
       return NextResponse.json({ error: 'Funcionário sem obra vinculada. Contate o administrador.' }, { status: 422 })
@@ -98,10 +120,38 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const vectorStr = `[${faceEmbedding.join(',')}]`
+    const faceCheck = await pool.query(
+      `SELECT (embedding <-> $1::vector) AS face_distance
+       FROM persons
+       WHERE id = $2
+         AND client_id = $3
+         AND active = TRUE
+         AND allow_face_login = TRUE
+         AND LOWER(email) = LOWER($4)
+         AND embedding IS NOT NULL
+       LIMIT 1`,
+      [vectorStr, Number(auth.employeeId), Number(auth.clientId), email]
+    )
+    if (!faceCheck.rowCount) {
+      return NextResponse.json({ error: 'Reconhecimento facial não habilitado para este usuário.' }, { status: 403 })
+    }
+
+    const faceDistance = Number(faceCheck.rows[0].face_distance)
+    if (!Number.isFinite(faceDistance) || faceDistance >= FACE_THRESHOLD) {
+      return NextResponse.json(
+        {
+          error: 'Falha na confirmação facial para registrar presença.',
+          faceDistance: Number.isFinite(faceDistance) ? Number(faceDistance.toFixed(4)) : null,
+        },
+        { status: 403 }
+      )
+    }
+
     const created = await pool.query(
-      `INSERT INTO employee_checkins (person_id, client_id, obra_id, checkin_lat, checkin_lng, checkin_distance_meters, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, checkin_at, checkin_lat, checkin_lng, checkin_distance_meters, notes`,
+      `INSERT INTO employee_checkins (person_id, client_id, obra_id, checkin_lat, checkin_lng, checkin_distance_meters, checkin_face_distance, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, checkin_at, checkin_lat, checkin_lng, checkin_distance_meters, checkin_face_distance, notes`,
       [
         Number(auth.employeeId),
         Number(auth.clientId),
@@ -109,6 +159,7 @@ export async function POST(request: NextRequest) {
         lat,
         lng,
         distanceMeters,
+        Number(faceDistance.toFixed(6)),
         notes,
       ]
     )

@@ -79,6 +79,32 @@ export default function EmployeesPage() {
     setModal(null)
   }
 
+  async function registerManualAttendance(personId: number, personName: string, action: 'checkin' | 'checkout') {
+    const reason = prompt(
+      action === 'checkin'
+        ? `Justifique o registro manual de ENTRADA para ${personName}:`
+        : `Justifique o registro manual de SAÍDA para ${personName}:`
+    )
+    if (!reason) return
+
+    const res = await fetch('/api/employee/checkins/override', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ personId, action, reason }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      alert(data.error ?? 'Falha ao registrar exceção manual')
+      return
+    }
+
+    alert(
+      action === 'checkin'
+        ? 'Entrada manual registrada com justificativa.'
+        : 'Saída manual registrada com justificativa.'
+    )
+  }
+
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       {/* Cabeçalho */}
@@ -210,6 +236,18 @@ export default function EmployeesPage() {
                   className="flex-1 min-w-[45%] py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium"
                 >
                   ✏️ Editar
+                </button>
+                <button
+                  onClick={() => registerManualAttendance(emp.id, emp.name, 'checkin')}
+                  className="flex-1 min-w-[45%] py-1.5 bg-emerald-900/30 hover:bg-emerald-900/60 text-emerald-300 rounded-lg text-xs font-medium"
+                >
+                  ✅ Entrada manual
+                </button>
+                <button
+                  onClick={() => registerManualAttendance(emp.id, emp.name, 'checkout')}
+                  className="flex-1 min-w-[45%] py-1.5 bg-amber-900/30 hover:bg-amber-900/60 text-amber-300 rounded-lg text-xs font-medium"
+                >
+                  🚪 Saída manual
                 </button>
                 <button
                   onClick={() => deleteEmployee(emp.id, emp.name)}

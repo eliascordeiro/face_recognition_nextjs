@@ -155,15 +155,31 @@ export async function initDb(): Promise<void> {
         checkin_lat DECIMAL(10,8),
         checkin_lng DECIMAL(11,8),
         checkin_distance_meters INTEGER,
+        checkin_face_distance NUMERIC(8,6),
+        checkin_method VARCHAR(20) NOT NULL DEFAULT 'strict',
+        checkin_override_reason TEXT,
+        checkin_override_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         checkout_lat DECIMAL(10,8),
         checkout_lng DECIMAL(11,8),
         checkout_distance_meters INTEGER,
+        checkout_face_distance NUMERIC(8,6),
+        checkout_method VARCHAR(20) NOT NULL DEFAULT 'strict',
+        checkout_override_reason TEXT,
+        checkout_override_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         notes TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )
     `)
     await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkin_distance_meters INTEGER`)
     await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkout_distance_meters INTEGER`)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkin_face_distance NUMERIC(8,6)`)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkout_face_distance NUMERIC(8,6)`)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkin_method VARCHAR(20) NOT NULL DEFAULT 'strict'`)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkin_override_reason TEXT`)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkin_override_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkout_method VARCHAR(20) NOT NULL DEFAULT 'strict'`)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkout_override_reason TEXT`)
+    await client.query(`ALTER TABLE employee_checkins ADD COLUMN IF NOT EXISTS checkout_override_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`)
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_person_idx ON employee_checkins (person_id, checkin_at DESC)`)
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_client_idx ON employee_checkins (client_id, checkin_at DESC)`)
 

@@ -120,6 +120,13 @@ export async function proxy(request: NextRequest) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
 
+    if (pathname.startsWith('/api/employee/checkins/override')) {
+      if (role !== 'client') {
+        return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
+      }
+      return NextResponse.next()
+    }
+
     if (pathname.startsWith('/api/employee/checkins') && role !== 'employee') {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
