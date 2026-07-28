@@ -74,6 +74,17 @@ interface ExpenseListResponse {
   }
 }
 
+interface OcrClassificationSuggestion {
+  category: string
+  vendorName: string | null
+  amountCents: number | null
+  receiptNumber: string | null
+  expenseDate: string | null
+  title: string | null
+  confidence: number
+  warnings: string[]
+}
+
 type ExpenseSortOption = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc' | 'title_asc'
 type AuditSortOption = 'recent_desc' | 'recent_asc' | 'action_asc' | 'user_asc'
 
@@ -310,6 +321,10 @@ export default function ExpensesPage() {
   const [ocrProgress, setOcrProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [ocrMessage, setOcrMessage] = useState<string | null>(null)
+  const [classificationMessage, setClassificationMessage] = useState<string | null>(null)
+  const [classifyingReceipt, setClassifyingReceipt] = useState(false)
+  const [classificationSource, setClassificationSource] = useState<'ai' | 'heuristic' | null>(null)
+  const [classificationSuggestion, setClassificationSuggestion] = useState<OcrClassificationSuggestion | null>(null)
   const [receiptImage, setReceiptImage] = useState<File | null>(null)
   const [receiptImagePreview, setReceiptImagePreview] = useState<string | null>(null)
   const [uploadingReceipt, setUploadingReceipt] = useState(false)
@@ -780,6 +795,10 @@ export default function ExpensesPage() {
     setUploadedReceipt(null)
     setOcrSuggestedTotalCents(null)
     setOcrMessage(null)
+    setClassificationMessage(null)
+    setClassifyingReceipt(false)
+    setClassificationSource(null)
+    setClassificationSuggestion(null)
     setOcrProgress(0)
     setError(null)
   }
@@ -809,6 +828,10 @@ export default function ExpensesPage() {
     setReceiptImagePreview(expense.receipt_image_url)
     setOcrSuggestedTotalCents(expense.receipt_total_cents)
     setOcrMessage(null)
+    setClassificationMessage(null)
+    setClassifyingReceipt(false)
+    setClassificationSource(null)
+    setClassificationSuggestion(null)
     setOcrProgress(0)
     setError(null)
   }
@@ -817,6 +840,10 @@ export default function ExpensesPage() {
     const file = event.target.files?.[0] ?? null
     setReceiptImage(file)
     setOcrMessage(null)
+    setClassificationMessage(null)
+    setClassifyingReceipt(false)
+    setClassificationSource(null)
+    setClassificationSuggestion(null)
     setOcrSuggestedTotalCents(null)
     setUploadedReceipt(null)
 
@@ -830,6 +857,59 @@ export default function ExpensesPage() {
       setReceiptImagePreview(typeof reader.result === 'string' ? reader.result : null)
     }
     reader.readAsDataURL(file)
+  }
+
+  function applyClassificationSuggestion(suggestion: OcrClassificationSuggestion) {
+    setForm((prev) => ({
+      ...prev,
+      category: suggestion.category || prev.category,
+      title: prev.title || suggestion.title || prev.title,
+      vendorName: prev.vendorName || suggestion.vendorName || prev.vendorName,
+      receiptNumber: prev.receiptNumber || suggestion.receiptNumber || prev.receiptNumber,
+      expenseDate: suggestion.expenseDate || prev.expenseDate,
+      amount: prev.amount || (suggestion.amountCents !== null ? centsToInputMoney(suggestion.amountCents) : prev.amount),
+    }))
+    if (suggestion.amountCents !== null && suggestion.amountCents > 0) {
+      setOcrSuggestedTotalCents(suggestion.amountCents)
+    }
+  }
+
+  async function classifyOcrText(ocrText: string) {
+    setClassifyingReceipt(true)
+    setClassificationMessage('Classificando texto OCR...')
+
+    try {
+      const response = await fetch('/api/expenses/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ocrText }),
+      })
+      const data = await response.json().catch(() => null) as {
+        source?: 'ai' | 'heuristic'
+        suggestion?: OcrClassificationSuggestion
+        error?: string
+      } | null
+
+      if (!response.ok || !data?.suggestion) {
+        setClassificationMessage(data?.error ?? 'Classificação indisponível no momento.')
+        return
+      }
+
+      setClassificationSource(data.source ?? 'heuristic')
+      setClassificationSuggestion(data.suggestion)
+      applyClassificationSuggestion(data.suggestion)
+
+      const confidencePercent = Math.round((data.suggestion.confidence ?? 0) * 100)
+      setClassificationMessage(
+        data.source === 'ai'
+          ? `Classificação por IA aplicada (${confidencePercent}% de confiança).`
+          : `Classificação heurística aplicada (${confidencePercent}% de confiança).`
+      )
+    } catch {
+      setClassificationMessage('Falha ao classificar o texto OCR.')
+    } finally {
+      setClassifyingReceipt(false)
+    }
   }
 
 
@@ -913,6 +993,10 @@ export default function ExpensesPage() {
         setOcrMessage(`Leitura concluída. Total sugerido: ${formatMoney(insights.selectedAmountCents)}.`)
       } else {
         setOcrMessage('Leitura concluída. Revise o texto OCR e informe o valor manualmente.')
+      }
+
+      if (recognizedText.length >= 12) {
+        await classifyOcrText(recognizedText)
       }
     } catch {
       setError('Falha ao processar o OCR do comprovante')
@@ -1334,6 +1418,30 @@ export default function ExpensesPage() {
                   </div>
 
                   {ocrMessage && <p className="text-sm text-slate-300">{ocrMessage}</p>}
+                  {classificationMessage && <p className="text-sm text-sky-300">{classificationMessage}</p>}
+                  {classifyingReceipt && <p className="text-sm text-slate-300">Analisando categoria e campos do comprovante...</p>}
+                  {classificationSuggestion && (
+                    <div className="rounded-lg border border-sky-400/25 bg-sky-500/10 p-3 text-sm text-sky-100">
+                      <p className="font-medium">
+                        Sugestão {classificationSource === 'ai' ? 'da IA' : 'heurística'}: {getCategoryLabel(classificationSuggestion.category)}
+                      </p>
+                      <p className="mt-1 text-xs text-sky-200/90">
+                        Confiança: {Math.round((classificationSuggestion.confidence ?? 0) * 100)}%
+                      </p>
+                      {classificationSuggestion.warnings?.length > 0 && (
+                        <p className="mt-1 text-xs text-amber-200">
+                          Atenção: {classificationSuggestion.warnings.join(' ')}
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => applyClassificationSuggestion(classificationSuggestion)}
+                        className="mt-2 rounded-md border border-sky-300/40 px-2.5 py-1 text-xs font-medium text-sky-100 transition hover:border-sky-200 hover:bg-sky-500/20"
+                      >
+                        Reaplicar sugestão
+                      </button>
+                    </div>
+                  )}
                   {uploadingReceipt && <p className="text-sm text-sky-300">Enviando comprovante para storage...</p>}
                   {editingExpenseId && uploadedReceipt?.url && !receiptImage && (
                     <p className="text-sm text-emerald-300">Este gasto já possui um comprovante salvo. Escolha outra imagem para substituir.</p>
