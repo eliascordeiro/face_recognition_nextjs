@@ -39,6 +39,18 @@ interface EmployeeRequest {
   updated_at: string
   resolved_at: string | null
   obra_name: string | null
+  attachments: Array<{
+    id: number
+    url: string
+    publicId: string
+    originalFilename: string | null
+    mimeType: string | null
+    format: string | null
+    bytes: number | null
+    width: number | null
+    height: number | null
+    createdAt: string
+  }>
 }
 
 type EmployeeTab = 'services' | 'requests' | 'history'
@@ -67,6 +79,8 @@ export default function EmployeeHomePage() {
   const [requestSaving, setRequestSaving] = useState(false)
   const [requestMessage, setRequestMessage] = useState<string | null>(null)
   const [requests, setRequests] = useState<EmployeeRequest[]>([])
+  const [requestAttachments, setRequestAttachments] = useState<EmployeeRequest['attachments']>([])
+  const [attachmentUploading, setAttachmentUploading] = useState(false)
   const [requestForm, setRequestForm] = useState({
     type: 'advance' as EmployeeRequest['type'],
     title: '',
@@ -228,6 +242,56 @@ export default function EmployeeHomePage() {
     }
   }
 
+  async function uploadRequestAttachment(file: File) {
+    const body = new FormData()
+    body.append('file', file)
+
+    const res = await fetch('/api/employee/requests/upload', {
+      method: 'POST',
+      body,
+    })
+    const data = await res.json().catch(() => null) as
+      | { error?: string; url?: string; publicId?: string; format?: string | null; bytes?: number | null; width?: number | null; height?: number | null; originalFilename?: string | null; mimeType?: string | null }
+      | null
+
+    if (!res.ok || !data?.url || !data.publicId) {
+      throw new Error((data && typeof data.error === 'string' ? data.error : null) ?? 'Falha ao enviar anexo')
+    }
+
+    return {
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      url: data.url,
+      publicId: data.publicId,
+      originalFilename: data.originalFilename ?? file.name,
+      mimeType: data.mimeType ?? file.type,
+      format: data.format ?? null,
+      bytes: typeof data.bytes === 'number' ? data.bytes : null,
+      width: typeof data.width === 'number' ? data.width : null,
+      height: typeof data.height === 'number' ? data.height : null,
+      createdAt: new Date().toISOString(),
+    }
+  }
+
+  async function handleRequestAttachmentsChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? [])
+    if (files.length === 0) return
+
+    setAttachmentUploading(true)
+    setRequestMessage(null)
+    try {
+      const uploaded: EmployeeRequest['attachments'] = []
+      for (const file of files.slice(0, 3 - requestAttachments.length)) {
+        uploaded.push(await uploadRequestAttachment(file))
+      }
+      setRequestAttachments((prev) => [...prev, ...uploaded])
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : 'Falha ao enviar anexo')
+    } finally {
+      setAttachmentUploading(false)
+      event.target.value = ''
+    }
+  }
+
   async function registerCheckin() {
     setCheckinLoading(true)
     setCheckinMessage(null)
@@ -305,6 +369,7 @@ export default function EmployeeHomePage() {
         title: requestForm.title,
         amount: requestForm.type === 'advance' ? requestForm.amount : null,
         description: requestForm.description,
+        attachments: requestAttachments,
       }
 
       const res = await fetch('/api/employee/requests', {
@@ -319,6 +384,7 @@ export default function EmployeeHomePage() {
       }
 
       setRequestForm({ type: 'advance', title: '', amount: '', description: '' })
+      setRequestAttachments([])
       setRequestMessage('Solicitação enviada para o gestor.')
       await loadRequests()
     } finally {
@@ -606,13 +672,41 @@ export default function EmployeeHomePage() {
                 className="w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm text-slate-100"
               />
 
+              <div className="space-y-2">
+                <label className="block text-xs text-slate-400">Anexos</label>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  multiple
+                  onChange={handleRequestAttachmentsChange}
+                  disabled={attachmentUploading || requestAttachments.length >= 3}
+                  className="w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-slate-100 hover:file:bg-slate-600"
+                />
+                <p className="text-[11px] text-slate-500">Até 3 anexos, imagens ou PDF.</p>
+                {requestAttachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {requestAttachments.map((attachment) => (
+                      <a
+                        key={attachment.id}
+                        href={attachment.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded-full border border-sky-700 bg-sky-950/20 px-3 py-1 text-xs text-sky-200"
+                      >
+                        📎 {attachment.originalFilename ?? 'Anexo'}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={submitRequest}
-                disabled={requestSaving}
+                disabled={requestSaving || attachmentUploading}
                 className="w-full rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white py-2 text-sm font-semibold"
               >
-                {requestSaving ? 'Enviando...' : 'Enviar para aprovação'}
+                {requestSaving ? 'Enviando...' : attachmentUploading ? 'Enviando anexo...' : 'Enviar para aprovação'}
               </button>
             </div>
 

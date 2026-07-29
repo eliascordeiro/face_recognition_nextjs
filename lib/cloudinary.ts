@@ -70,6 +70,59 @@ export async function uploadReceiptImage(params: {
   })
 }
 
+interface UploadedAttachment {
+  secureUrl: string
+  publicId: string
+  format: string | null
+  bytes: number | null
+  width: number | null
+  height: number | null
+}
+
+export async function uploadRequestAttachment(params: {
+  buffer: Buffer
+  clientId: string
+  originalFilename?: string | null
+  mimeType?: string | null
+}): Promise<UploadedAttachment> {
+  if (!isCloudinaryConfigured()) {
+    throw new Error('Cloudinary não configurado')
+  }
+
+  const folder = `controle-de-obras/client-${params.clientId}/requests`
+
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: 'auto',
+        overwrite: false,
+        use_filename: true,
+        unique_filename: true,
+        filename_override: params.originalFilename ?? undefined,
+        tags: ['request', 'attachment'],
+      },
+      (error, result) => {
+        if (error || !result) {
+          reject(error ?? new Error('Falha no upload do anexo'))
+          return
+        }
+
+        resolve({
+          secureUrl: result.secure_url,
+          publicId: result.public_id,
+          format: result.format ?? null,
+          bytes: typeof result.bytes === 'number' ? result.bytes : null,
+          width: typeof result.width === 'number' ? result.width : null,
+          height: typeof result.height === 'number' ? result.height : null,
+        })
+      }
+    )
+
+    stream.end(params.buffer)
+  })
+}
+
 export async function deleteReceiptImage(publicId: string | null | undefined): Promise<void> {
   if (!publicId || !isCloudinaryConfigured()) return
 

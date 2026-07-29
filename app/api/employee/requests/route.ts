@@ -49,10 +49,29 @@ export async function GET() {
     const result = await pool.query(
       `SELECT r.id, r.type, r.title, r.description, r.amount_cents, r.status,
               r.manager_note, r.created_at, r.updated_at, r.resolved_at,
-              o.name AS obra_name
+              o.name AS obra_name,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', a.id,
+                    'url', a.url,
+                    'publicId', a.public_id,
+                    'originalFilename', a.original_filename,
+                    'mimeType', a.mime_type,
+                    'format', a.format,
+                    'bytes', a.bytes,
+                    'width', a.width,
+                    'height', a.height,
+                    'createdAt', a.created_at
+                  )
+                  ORDER BY a.created_at ASC
+                ) FILTER (WHERE a.id IS NOT NULL), '[]'::json
+              ) AS attachments
        FROM employee_requests r
        LEFT JOIN obras o ON o.id = r.obra_id
+       LEFT JOIN employee_request_attachments a ON a.request_id = r.id
        WHERE r.employee_id = $1
+       GROUP BY r.id, o.name
        ORDER BY r.created_at DESC
        LIMIT 40`,
       [Number(auth.employeeId)]
@@ -79,6 +98,7 @@ export async function POST(request: NextRequest) {
     const title = typeof body.title === 'string' ? body.title.trim().slice(0, 160) : ''
     const description = typeof body.description === 'string' ? body.description.trim().slice(0, 2000) : ''
     const amountCents = toCents(body.amount)
+    const attachments = Array.isArray(body.attachments) ? body.attachments : []
 
     if (title.length < 3) {
       return NextResponse.json({ error: 'Informe um título com pelo menos 3 caracteres.' }, { status: 422 })
@@ -116,6 +136,31 @@ export async function POST(request: NextRequest) {
     )
 
     const requestRow = created.rows[0]
+    for (const attachment of attachments) {
+      if (!attachment || typeof attachment !== 'object') continue
+      const typed = attachment as Record<string, unknown>
+      if (typeof typed.url !== 'string' || typeof typed.publicId !== 'string') continue
+
+      await pool.query(
+        `INSERT INTO employee_request_attachments (
+           request_id, client_id, url, public_id, original_filename, mime_type, format, bytes, width, height
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          Number(requestRow.id),
+          Number(auth.clientId),
+          typed.url,
+          typed.publicId,
+          typeof typed.originalFilename === 'string' ? typed.originalFilename : null,
+          typeof typed.mimeType === 'string' ? typed.mimeType : null,
+          typeof typed.format === 'string' ? typed.format : null,
+          typeof typed.bytes === 'number' ? Math.round(typed.bytes) : null,
+          typeof typed.width === 'number' ? Math.round(typed.width) : null,
+          typeof typed.height === 'number' ? Math.round(typed.height) : null,
+        ]
+      )
+    }
+
     const amountLabel = requestRow.amount_cents != null
       ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(requestRow.amount_cents) / 100)
       : null

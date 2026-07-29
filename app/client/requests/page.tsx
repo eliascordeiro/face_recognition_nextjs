@@ -17,6 +17,18 @@ interface EmployeeRequest {
   employee_name: string
   obra_id: number | null
   obra_name: string | null
+  attachments: Array<{
+    id: number
+    url: string
+    publicId: string
+    originalFilename: string | null
+    mimeType: string | null
+    format: string | null
+    bytes: number | null
+    width: number | null
+    height: number | null
+    createdAt: string
+  }>
 }
 
 interface ManagerNotification {
@@ -187,6 +199,44 @@ export default function ClientRequestsPage() {
               </div>
 
               {item.description && <p className="text-sm text-slate-300 whitespace-pre-wrap">{item.description}</p>}
+
+              {item.attachments.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-400">Anexos</p>
+                  <div className="flex flex-wrap gap-2">
+                    {item.attachments.map((attachment) => (
+                      <a
+                        key={attachment.id}
+                        href={attachment.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded-full border border-sky-700 bg-sky-950/20 px-3 py-1 text-xs text-sky-200 hover:bg-sky-900/30"
+                      >
+                        📎 {attachment.originalFilename ?? 'Anexo'}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {Array.isArray(item.attachments) && item.attachments.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-400">Anexos</p>
+                  <div className="flex flex-wrap gap-2">
+                    {item.attachments.map((attachment) => (
+                      <a
+                        key={attachment.id}
+                        href={attachment.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded-full border border-sky-700 bg-sky-950/20 px-3 py-1 text-xs text-sky-200 hover:bg-sky-900/30"
+                      >
+                        📎 {attachment.originalFilename ?? 'Anexo'}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
                 <span>Valor: <strong className="text-slate-200">{formatMoney(item.amount_cents)}</strong></span>

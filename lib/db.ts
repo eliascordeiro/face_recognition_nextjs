@@ -218,6 +218,39 @@ export async function initDb(): Promise<void> {
     await client.query(`CREATE INDEX IF NOT EXISTS employee_requests_client_status_idx ON employee_requests (client_id, status, created_at DESC)`)
     await client.query(`CREATE INDEX IF NOT EXISTS employee_requests_employee_idx ON employee_requests (employee_id, created_at DESC)`)
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS employee_request_attachments (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER NOT NULL REFERENCES employee_requests(id) ON DELETE CASCADE,
+        client_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        url TEXT NOT NULL,
+        public_id VARCHAR(255) NOT NULL,
+        original_filename VARCHAR(255),
+        mime_type VARCHAR(80),
+        format VARCHAR(30),
+        bytes INTEGER,
+        width INTEGER,
+        height INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS request_id INTEGER REFERENCES employee_requests(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS url TEXT`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS public_id VARCHAR(255)`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS original_filename VARCHAR(255)`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS mime_type VARCHAR(80)`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS format VARCHAR(30)`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS bytes INTEGER`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS width INTEGER`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS height INTEGER`)
+    await client.query(`ALTER TABLE employee_request_attachments ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`)
+    await client.query(`UPDATE employee_request_attachments SET url = 'about:blank' WHERE url IS NULL OR BTRIM(url) = ''`)
+    await client.query(`UPDATE employee_request_attachments SET public_id = 'unknown' WHERE public_id IS NULL OR BTRIM(public_id) = ''`)
+    await client.query(`ALTER TABLE employee_request_attachments ALTER COLUMN url SET NOT NULL`)
+    await client.query(`ALTER TABLE employee_request_attachments ALTER COLUMN public_id SET NOT NULL`)
+    await client.query(`CREATE INDEX IF NOT EXISTS employee_request_attachments_request_idx ON employee_request_attachments (request_id, created_at ASC)`)
+
     // Fila de notificações in-app para gestor (cliente)
     await client.query(`
       CREATE TABLE IF NOT EXISTS manager_notifications (

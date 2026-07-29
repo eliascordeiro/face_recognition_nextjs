@@ -46,11 +46,30 @@ export async function GET(request: NextRequest) {
       `SELECT r.id, r.type, r.title, r.description, r.amount_cents, r.status,
               r.manager_note, r.created_at, r.updated_at, r.resolved_at,
               p.id AS employee_id, p.name AS employee_name,
-              o.id AS obra_id, o.name AS obra_name
+              o.id AS obra_id, o.name AS obra_name,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', a.id,
+                    'url', a.url,
+                    'publicId', a.public_id,
+                    'originalFilename', a.original_filename,
+                    'mimeType', a.mime_type,
+                    'format', a.format,
+                    'bytes', a.bytes,
+                    'width', a.width,
+                    'height', a.height,
+                    'createdAt', a.created_at
+                  )
+                  ORDER BY a.created_at ASC
+                ) FILTER (WHERE a.id IS NOT NULL), '[]'::json
+              ) AS attachments
        FROM employee_requests r
        INNER JOIN persons p ON p.id = r.employee_id
        LEFT JOIN obras o ON o.id = r.obra_id
+       LEFT JOIN employee_request_attachments a ON a.request_id = r.id
        ${whereSql}
+       GROUP BY r.id, p.id, o.id
        ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END, r.created_at DESC
        LIMIT 120`,
       params
