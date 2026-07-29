@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 interface EmployeeRequest {
   id: number
@@ -103,8 +103,10 @@ export default function ClientRequestsPage() {
   const [error, setError] = useState<string | null>(null)
   const [payload, setPayload] = useState<ApiPayload>({ requests: [], notifications: [], unreadCount: 0 })
   const [noteByRequest, setNoteByRequest] = useState<Record<number, string>>({})
+  const [liveConnected, setLiveConnected] = useState(false)
+  const [lastSync, setLastSync] = useState<string | null>(null)
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
     const res = await fetch(`/api/client/employee-requests?status=${statusFilter}`)
@@ -115,12 +117,57 @@ export default function ClientRequestsPage() {
       return
     }
     setPayload(data)
+    setLastSync(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
     setLoading(false)
-  }
+  }, [statusFilter])
 
   useEffect(() => {
-    loadData()
-  }, [statusFilter])
+    void loadData()
+  }, [loadData])
+
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') {
+      const timer = globalThis.setInterval(() => {
+        void loadData()
+      }, 25000)
+      return () => globalThis.clearInterval(timer)
+    }
+
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let eventSource: EventSource | null = null
+    let closed = false
+
+    const connect = () => {
+      if (closed) return
+
+      eventSource = new EventSource('/api/client/employee-requests/stream')
+      eventSource.addEventListener('connected', () => {
+        setLiveConnected(true)
+      })
+      eventSource.addEventListener('requests-updated', () => {
+        void loadData()
+      })
+      eventSource.onerror = () => {
+        setLiveConnected(false)
+        eventSource?.close()
+        if (!closed && !reconnectTimer) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null
+            connect()
+          }, 5000)
+        }
+      }
+    }
+
+    connect()
+
+    return () => {
+      closed = true
+      setLiveConnected(false)
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      eventSource?.close()
+    }
+  }, [loadData])
 
   const summary = useMemo(() => {
     const grouped = { pending: 0, approved: 0, rejected: 0, cancelled: 0 }
@@ -164,6 +211,9 @@ export default function ClientRequestsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Solicitações da equipe</h1>
           <p className="text-slate-400 text-sm mt-1">Aprove adiantamentos e acompanhe ocorrências dos funcionários.</p>
+          <p className="text-xs text-slate-500 mt-1">
+            Tempo real: {liveConnected ? 'ativo' : 'reconectando'}{lastSync ? ` • última sincronização às ${lastSync}` : ''}
+          </p>
         </div>
         <button
           type="button"
