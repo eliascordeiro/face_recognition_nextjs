@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 type FaceApiType = typeof import('face-api.js')
@@ -236,7 +236,7 @@ export default function EmployeeHomePage() {
     setHistory(Array.isArray(data.history) ? data.history : [])
   }
 
-  async function loadRequests() {
+  const loadRequests = useCallback(async () => {
     setRequestLoading(true)
     try {
       const res = await fetch('/api/employee/requests')
@@ -268,16 +268,48 @@ export default function EmployeeHomePage() {
     } finally {
       setRequestLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     if (!me) return
-    const timer = window.setInterval(() => {
-      loadRequests()
-    }, 25000)
 
-    return () => window.clearInterval(timer)
-  }, [me?.id])
+    if (typeof EventSource === 'undefined') {
+      const timer = globalThis.setInterval(() => {
+        void loadRequests()
+      }, 25000)
+      return () => globalThis.clearInterval(timer)
+    }
+
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let eventSource: EventSource | null = null
+    let closed = false
+
+    const connect = () => {
+      if (closed) return
+
+      eventSource = new EventSource('/api/employee/requests/stream')
+      eventSource.addEventListener('requests-updated', () => {
+        void loadRequests()
+      })
+      eventSource.onerror = () => {
+        eventSource?.close()
+        if (!closed && !reconnectTimer) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null
+            connect()
+          }, 5000)
+        }
+      }
+    }
+
+    connect()
+
+    return () => {
+      closed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      eventSource?.close()
+    }
+  }, [me?.id, loadRequests])
 
   async function uploadRequestAttachment(file: File) {
     const body = new FormData()
