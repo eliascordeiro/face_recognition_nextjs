@@ -78,6 +78,8 @@ export default function EmployeeHomePage() {
   const [requestLoading, setRequestLoading] = useState(false)
   const [requestSaving, setRequestSaving] = useState(false)
   const [requestMessage, setRequestMessage] = useState<string | null>(null)
+  const [requestUpdateNotice, setRequestUpdateNotice] = useState<string | null>(null)
+  const [requestLastSync, setRequestLastSync] = useState<string | null>(null)
   const [requests, setRequests] = useState<EmployeeRequest[]>([])
   const [requestAttachments, setRequestAttachments] = useState<EmployeeRequest['attachments']>([])
   const [attachmentUploading, setAttachmentUploading] = useState(false)
@@ -236,11 +238,35 @@ export default function EmployeeHomePage() {
         setRequests([])
         return
       }
+
+      const previousById = new Map(requests.map((item) => [item.id, item]))
+      const statusTransitions = data
+        .map((item) => {
+          const previous = previousById.get(item.id)
+          if (!previous || previous.status === item.status) return null
+          return `${item.title} foi ${formatRequestStatus(item.status).toLowerCase()}`
+        })
+        .filter((value): value is string => Boolean(value))
+
+      if (statusTransitions.length > 0) {
+        setRequestUpdateNotice(statusTransitions.slice(0, 2).join(' • '))
+      }
+
       setRequests(data)
+      setRequestLastSync(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
     } finally {
       setRequestLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!me) return
+    const timer = window.setInterval(() => {
+      loadRequests()
+    }, 25000)
+
+    return () => window.clearInterval(timer)
+  }, [me?.id, requests])
 
   async function uploadRequestAttachment(file: File) {
     const body = new FormData()
@@ -363,6 +389,7 @@ export default function EmployeeHomePage() {
   async function submitRequest() {
     setRequestSaving(true)
     setRequestMessage(null)
+    setRequestUpdateNotice(null)
     try {
       const payload = {
         type: requestForm.type,
@@ -395,6 +422,7 @@ export default function EmployeeHomePage() {
   async function cancelRequest(id: number) {
     setRequestSaving(true)
     setRequestMessage(null)
+    setRequestUpdateNotice(null)
     try {
       const res = await fetch(`/api/employee/requests/${id}`, {
         method: 'PATCH',
@@ -633,6 +661,17 @@ export default function EmployeeHomePage() {
           <div className="auth-panel p-4 space-y-3">
             <h2 className="text-white font-semibold">Solicitações e ocorrências</h2>
 
+            <div className="rounded-xl border border-slate-700 bg-slate-900/50 px-3 py-2 text-xs text-slate-300 flex items-center justify-between gap-3">
+              <span>Sincronização automática ativa</span>
+              <span>{requestLastSync ? `Última verificação às ${requestLastSync}` : 'Ainda não sincronizado'}</span>
+            </div>
+
+            {requestUpdateNotice && (
+              <div className="rounded-xl border border-emerald-700 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-200">
+                {requestUpdateNotice}
+              </div>
+            )}
+
             <div className="rounded-xl border border-slate-600 bg-slate-800/60 p-3 space-y-2">
               <label className="text-xs text-slate-400 block">Tipo de solicitação</label>
               <select
@@ -730,6 +769,24 @@ export default function EmployeeHomePage() {
                   </div>
                   <p className="text-xs text-slate-400">{formatRequestType(item.type)} • {item.obra_name ?? 'Sem obra'}</p>
                   {item.description && <p className="text-xs text-slate-300 whitespace-pre-wrap">{item.description}</p>}
+                  {item.attachments.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] text-slate-400">Anexos</p>
+                      <div className="flex flex-wrap gap-2">
+                        {item.attachments.map((attachment) => (
+                          <a
+                            key={attachment.id}
+                            href={attachment.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded-full border border-sky-700 bg-sky-950/20 px-3 py-1 text-[11px] text-sky-200"
+                          >
+                            📎 {attachment.originalFilename ?? 'Anexo'}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="text-xs text-slate-400 flex items-center justify-between gap-2">
                     <span>Valor: {formatMoney(item.amount_cents)}</span>
                     <span>{formatDateTime(item.created_at)}</span>
