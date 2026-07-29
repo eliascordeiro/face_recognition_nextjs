@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
+import { getRecognizeFaceThreshold, toFaceConfidencePercent } from '@/lib/faceRecognition'
 
-// Distância L2 máxima para confirmar match.
-// face-api.js produz descritores normalizados — limiar típico: 0.6
-const MATCH_THRESHOLD = 0.6
+const RECOGNIZE_THRESHOLD = getRecognizeFaceThreshold()
 
 function parseEmbedding(raw: unknown): number[] {
   if (!Array.isArray(raw) || raw.length !== 128) {
@@ -45,16 +44,19 @@ export async function POST(request: NextRequest) {
 
     const { id, name, distance } = result.rows[0]
     const dist = parseFloat(distance)
-    const match = dist < MATCH_THRESHOLD
-    const confidence = match
-      ? Math.max(0, Math.round((1 - dist / MATCH_THRESHOLD) * 100))
-      : 0
+    const match = dist < RECOGNIZE_THRESHOLD
+    const confidence = toFaceConfidencePercent(dist, RECOGNIZE_THRESHOLD)
+
+    console.info(
+      `[recognize] client=${auth.clientId} person=${id} match=${match} distance=${dist.toFixed(4)} threshold=${RECOGNIZE_THRESHOLD.toFixed(4)} confidence=${confidence}`
+    )
 
     return NextResponse.json({
       match,
       person_id: match ? id : null,
       name: match ? name : null,
       distance: Math.round(dist * 10000) / 10000,
+      threshold: Number(RECOGNIZE_THRESHOLD.toFixed(4)),
       confidence: match ? confidence : null,
     })
   } catch (err: unknown) {

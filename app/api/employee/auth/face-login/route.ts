@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { COOKIE_NAME, COOKIE_OPTIONS, signToken } from '@/lib/auth'
 import { isValidEmail, normalizeEmail } from '@/lib/security'
+import { getEmployeeFaceLoginThreshold, toFaceConfidencePercent } from '@/lib/faceRecognition'
 
-const MATCH_THRESHOLD = 0.6
+const MATCH_THRESHOLD = getEmployeeFaceLoginThreshold()
 
 function parseEmbedding(raw: unknown): number[] {
   if (!Array.isArray(raw) || raw.length !== 128) {
@@ -45,11 +46,21 @@ export async function POST(request: NextRequest) {
 
     const person = found.rows[0]
     const distance = Number(person.distance)
+    const confidence = toFaceConfidencePercent(distance, MATCH_THRESHOLD)
     if (!Number.isFinite(distance) || distance >= MATCH_THRESHOLD) {
-      return NextResponse.json({ error: 'Rosto não reconhecido com confiança suficiente' }, { status: 401 })
+      console.warn(
+        `[employee.face-login] reject person=${person.id} distance=${Number.isFinite(distance) ? distance.toFixed(4) : 'NaN'} threshold=${MATCH_THRESHOLD.toFixed(4)} confidence=${confidence}`
+      )
+      return NextResponse.json({
+        error: 'Rosto não reconhecido com confiança suficiente',
+        confidence,
+        faceThreshold: Number(MATCH_THRESHOLD.toFixed(4)),
+      }, { status: 401 })
     }
 
-    const confidence = Math.max(0, Math.round((1 - distance / MATCH_THRESHOLD) * 100))
+    console.info(
+      `[employee.face-login] accept person=${person.id} distance=${distance.toFixed(4)} threshold=${MATCH_THRESHOLD.toFixed(4)} confidence=${confidence}`
+    )
 
     const token = await signToken({
       sub: String(person.id),
@@ -68,6 +79,7 @@ export async function POST(request: NextRequest) {
       fullName: person.name,
       email: person.email,
       confidence,
+      faceThreshold: Number(MATCH_THRESHOLD.toFixed(4)),
       clientId: person.client_id ? String(person.client_id) : undefined,
       obraId: person.obra_id != null ? String(person.obra_id) : undefined,
     })

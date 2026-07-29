@@ -3,8 +3,9 @@ import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
 import { getCheckinMaxDistanceMeters, haversineDistanceMeters } from '@/lib/geo'
 import { isValidEmail, normalizeEmail } from '@/lib/security'
+import { getAttendanceFaceThreshold, toFaceConfidencePercent } from '@/lib/faceRecognition'
 
-const FACE_THRESHOLD = Number(process.env.ATTENDANCE_FACE_MAX_DISTANCE ?? 0.55)
+const FACE_THRESHOLD = getAttendanceFaceThreshold()
 
 function parseEmbedding(raw: unknown): number[] {
   if (!Array.isArray(raw) || raw.length !== 128) {
@@ -102,15 +103,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Reconhecimento facial não habilitado para este usuário.' }, { status: 403 })
     }
     const faceDistance = Number(faceCheck.rows[0].face_distance)
+    const faceConfidencePercent = toFaceConfidencePercent(faceDistance, FACE_THRESHOLD)
     if (!Number.isFinite(faceDistance) || faceDistance >= FACE_THRESHOLD) {
+      console.warn(
+        `[employee.checkout] facial_reject person=${auth.employeeId} distance=${Number.isFinite(faceDistance) ? faceDistance.toFixed(4) : 'NaN'} threshold=${FACE_THRESHOLD.toFixed(4)} confidence=${faceConfidencePercent}`
+      )
       return NextResponse.json(
         {
           error: 'Falha na confirmação facial para registrar saída.',
           faceDistance: Number.isFinite(faceDistance) ? Number(faceDistance.toFixed(4)) : null,
+          faceThreshold: Number(FACE_THRESHOLD.toFixed(4)),
+          faceConfidencePercent,
         },
         { status: 403 }
       )
     }
+
+    console.info(
+      `[employee.checkout] facial_accept person=${auth.employeeId} distance=${faceDistance.toFixed(4)} threshold=${FACE_THRESHOLD.toFixed(4)} confidence=${faceConfidencePercent} geoDistance=${distanceMeters}`
+    )
 
     const updated = await pool.query(
       `UPDATE employee_checkins
@@ -125,7 +136,11 @@ export async function POST(request: NextRequest) {
       [lat, lng, distanceMeters, Number(faceDistance.toFixed(6)), openCheckinId]
     )
 
-    return NextResponse.json(updated.rows[0])
+    return NextResponse.json({
+      ...updated.rows[0],
+      faceThreshold: Number(FACE_THRESHOLD.toFixed(4)),
+      faceConfidencePercent,
+    })
   } catch {
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
   }

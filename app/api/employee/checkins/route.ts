@@ -3,8 +3,9 @@ import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
 import { getCheckinMaxDistanceMeters, haversineDistanceMeters } from '@/lib/geo'
 import { isValidEmail, normalizeEmail } from '@/lib/security'
+import { getAttendanceFaceThreshold, toFaceConfidencePercent } from '@/lib/faceRecognition'
 
-const FACE_THRESHOLD = Number(process.env.ATTENDANCE_FACE_MAX_DISTANCE ?? 0.55)
+const FACE_THRESHOLD = getAttendanceFaceThreshold()
 
 function parseEmbedding(raw: unknown): number[] {
   if (!Array.isArray(raw) || raw.length !== 128) {
@@ -138,15 +139,25 @@ export async function POST(request: NextRequest) {
     }
 
     const faceDistance = Number(faceCheck.rows[0].face_distance)
+    const faceConfidencePercent = toFaceConfidencePercent(faceDistance, FACE_THRESHOLD)
     if (!Number.isFinite(faceDistance) || faceDistance >= FACE_THRESHOLD) {
+      console.warn(
+        `[employee.checkin] facial_reject person=${auth.employeeId} distance=${Number.isFinite(faceDistance) ? faceDistance.toFixed(4) : 'NaN'} threshold=${FACE_THRESHOLD.toFixed(4)} confidence=${faceConfidencePercent}`
+      )
       return NextResponse.json(
         {
           error: 'Falha na confirmação facial para registrar presença.',
           faceDistance: Number.isFinite(faceDistance) ? Number(faceDistance.toFixed(4)) : null,
+          faceThreshold: Number(FACE_THRESHOLD.toFixed(4)),
+          faceConfidencePercent,
         },
         { status: 403 }
       )
     }
+
+    console.info(
+      `[employee.checkin] facial_accept person=${auth.employeeId} distance=${faceDistance.toFixed(4)} threshold=${FACE_THRESHOLD.toFixed(4)} confidence=${faceConfidencePercent} geoDistance=${distanceMeters}`
+    )
 
     const created = await pool.query(
       `INSERT INTO employee_checkins (person_id, client_id, obra_id, checkin_lat, checkin_lng, checkin_distance_meters, checkin_face_distance, notes)
@@ -164,7 +175,14 @@ export async function POST(request: NextRequest) {
       ]
     )
 
-    return NextResponse.json(created.rows[0], { status: 201 })
+    return NextResponse.json(
+      {
+        ...created.rows[0],
+        faceThreshold: Number(FACE_THRESHOLD.toFixed(4)),
+        faceConfidencePercent,
+      },
+      { status: 201 }
+    )
   } catch {
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
   }
