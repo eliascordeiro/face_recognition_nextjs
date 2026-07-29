@@ -392,6 +392,7 @@ export default function ExpensesPage() {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [obraFilter, setObraFilter] = useState('all')
+  const [classificationFilter, setClassificationFilter] = useState<'all' | 'ai' | 'heuristic' | 'none'>('all')
   const [periodFilter, setPeriodFilter] = useState('this_month')
   const [expenseSort, setExpenseSort] = useState<ExpenseSortOption>('date_desc')
   const [form, setForm] = useState(EMPTY_FORM)
@@ -418,6 +419,7 @@ export default function ExpensesPage() {
         q: debouncedSearch.trim(),
         category: categoryFilter,
         obra: obraFilter === '' ? 'none' : obraFilter,
+        classification: classificationFilter,
         period: periodFilter,
         sort: expenseSort,
         limit: String(expensePageSize),
@@ -455,7 +457,7 @@ export default function ExpensesPage() {
     loadExpensesPage()
 
     return () => { cancelled = true }
-  }, [debouncedSearch, categoryFilter, obraFilter, periodFilter, expenseSort, expensePageSize, expenseRefreshToken])
+  }, [debouncedSearch, categoryFilter, obraFilter, classificationFilter, periodFilter, expenseSort, expensePageSize, expenseRefreshToken])
 
   useEffect(() => {
     let cancelled = false
@@ -563,6 +565,7 @@ export default function ExpensesPage() {
       q: debouncedSearch.trim(),
       category: categoryFilter,
       obra: obraFilter === '' ? 'none' : obraFilter,
+      classification: classificationFilter,
       period: periodFilter,
       sort: expenseSort,
       limit: String(expensePageSize),
@@ -714,6 +717,9 @@ export default function ExpensesPage() {
       'Documento',
       'Valor OCR',
       'Status OCR',
+      'Origem Classificacao OCR',
+      'Confianca Classificacao OCR',
+      'Diagnostico OCR',
       'Comprovante URL',
       'Observacoes',
     ]
@@ -728,6 +734,9 @@ export default function ExpensesPage() {
       expense.receipt_number ?? '',
       expense.receipt_total_cents != null ? (expense.receipt_total_cents / 100).toFixed(2).replace('.', ',') : '',
       expense.ocr_status,
+      getClassificationSourceLabel(expense.receipt_classification_source) ?? '',
+      typeof expense.receipt_classification_confidence === 'number' ? `${Math.round(expense.receipt_classification_confidence * 100)}%` : '',
+      getClassificationReasonLabel(expense.receipt_classification_reason) ?? '',
       expense.receipt_image_url ?? '',
       expense.notes ?? '',
     ])
@@ -770,7 +779,7 @@ export default function ExpensesPage() {
 
     doc.setTextColor(51, 65, 85)
     doc.setFontSize(10)
-    doc.text(`Filtros: periodo=${periodFilter} | categoria=${categoryFilter} | obra=${obraFilter} | busca=${search || 'sem filtro textual'}`, 40, 132)
+    doc.text(`Filtros: periodo=${periodFilter} | categoria=${categoryFilter} | obra=${obraFilter} | classif=${classificationFilter} | busca=${search || 'sem filtro textual'}`, 40, 132)
 
     autoTable(doc, {
       startY: 148,
@@ -812,7 +821,7 @@ export default function ExpensesPage() {
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 4 },
       headStyles: { fillColor: [30, 41, 59] },
-      head: [['Data', 'Descricao', 'Categoria', 'Obra', 'Fornecedor', 'Valor', 'Documento']],
+      head: [['Data', 'Descricao', 'Categoria', 'Obra', 'Fornecedor', 'Valor', 'Documento', 'Classif OCR']],
       body: filteredExpenses.length > 0
         ? filteredExpenses.map((expense) => [
             new Date(`${expense.expense_date}T00:00:00`).toLocaleDateString('pt-BR'),
@@ -822,8 +831,11 @@ export default function ExpensesPage() {
             expense.vendor_name ?? '-',
             formatMoney(expense.amount_cents),
             expense.receipt_number ?? '-',
+            getClassificationSourceLabel(expense.receipt_classification_source)
+              ? `${getClassificationSourceLabel(expense.receipt_classification_source)}${typeof expense.receipt_classification_confidence === 'number' ? ` ${Math.round(expense.receipt_classification_confidence * 100)}%` : ''}`
+              : '-',
           ])
-        : [['-', 'Nenhum gasto no recorte', '-', '-', '-', '-', '-']],
+        : [['-', 'Nenhum gasto no recorte', '-', '-', '-', '-', '-', '-']],
     })
 
     const dateLabel = new Date().toISOString().slice(0, 10)
@@ -1235,7 +1247,7 @@ export default function ExpensesPage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           <div>
             <label className="mb-1.5 block text-sm text-slate-300">Busca</label>
             <input
@@ -1284,6 +1296,19 @@ export default function ExpensesPage() {
               <option value="30d">Últimos 30 dias</option>
               <option value="this_month">Este mês</option>
               <option value="last_month">Mês anterior</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-300">Classificação OCR</label>
+            <select
+              value={classificationFilter}
+              onChange={(e) => setClassificationFilter(e.target.value as 'all' | 'ai' | 'heuristic' | 'none')}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-400"
+            >
+              <option value="all">Todas</option>
+              <option value="ai">IA</option>
+              <option value="heuristic">Heurística</option>
+              <option value="none">Sem classificação</option>
             </select>
           </div>
         </div>

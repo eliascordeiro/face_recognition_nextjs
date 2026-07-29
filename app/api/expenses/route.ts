@@ -51,6 +51,7 @@ export async function GET(request: NextRequest) {
     const queryText = (searchParams.get('q') ?? '').trim()
     const category = (searchParams.get('category') ?? 'all').trim()
     const obra = (searchParams.get('obra') ?? 'all').trim()
+    const classification = (searchParams.get('classification') ?? 'all').trim()
     const period = (searchParams.get('period') ?? 'all').trim()
     const sort = (searchParams.get('sort') ?? 'date_desc').trim() as keyof typeof VALID_SORTS
     const limit = clampInt(searchParams.get('limit'), 12, 1, 100)
@@ -73,6 +74,15 @@ export async function GET(request: NextRequest) {
           params.push(obraId)
           whereClauses.push(`e.obra_id = $${params.length}`)
         }
+      }
+    }
+
+    if (classification !== 'all') {
+      if (classification === 'none') {
+        whereClauses.push('e.receipt_classification_source IS NULL')
+      } else if (classification === 'ai' || classification === 'heuristic') {
+        params.push(classification)
+        whereClauses.push(`e.receipt_classification_source = $${params.length}`)
       }
     }
 
