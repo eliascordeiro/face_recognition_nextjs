@@ -11,7 +11,25 @@ const VALID_CLASSIFICATION_REASONS = ['disabled', 'missing_api_key', 'timeout', 
 function toCents(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value * 100)
   if (typeof value !== 'string') return null
-  const normalized = value.replace(/\./g, '').replace(',', '.').replace(/[^0-9.\-]/g, '')
+  const cleaned = value.trim().replace(/[^0-9,.-]/g, '')
+  if (!cleaned || !/\d/.test(cleaned)) return null
+
+  const lastComma = cleaned.lastIndexOf(',')
+  const lastDot = cleaned.lastIndexOf('.')
+  let normalized = cleaned
+
+  if (lastComma >= 0 && lastDot >= 0) {
+    // Keep the right-most symbol as decimal separator.
+    normalized = lastComma > lastDot
+      ? cleaned.replace(/\./g, '').replace(',', '.')
+      : cleaned.replace(/,/g, '')
+  } else if (lastComma >= 0) {
+    normalized = cleaned.replace(/\./g, '').replace(',', '.')
+  } else if (/^-?\d{1,3}\.\d{3}$/.test(cleaned)) {
+    // Format like 2.000 (thousand separator without cents).
+    normalized = cleaned.replace('.', '')
+  }
+
   const parsed = Number(normalized)
   if (!Number.isFinite(parsed)) return null
   return Math.round(parsed * 100)
