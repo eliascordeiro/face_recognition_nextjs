@@ -215,6 +215,19 @@ export default function ClientRequestsPage() {
     return grouped
   }, [payload.requests])
 
+  const highlightedRequestAvailable = useMemo(
+    () => highlightedRequestId != null && payload.requests.some((item) => item.id === highlightedRequestId),
+    [highlightedRequestId, payload.requests]
+  )
+
+  function focusHighlightedRequestCard() {
+    if (!highlightedRequestId) return
+    const target = document.getElementById(`request-card-${highlightedRequestId}`)
+    if (!target) return
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    target.focus({ preventScroll: true })
+  }
+
   async function updateRequestStatus(requestId: number, status: 'approved' | 'rejected') {
     setSavingId(requestId)
     setError(null)
@@ -287,8 +300,17 @@ export default function ClientRequestsPage() {
       {error && <div className="rounded-xl border border-rose-800 bg-rose-950/30 text-rose-200 p-3 text-sm">{error}</div>}
 
       {liveNotice && (
-        <div className="rounded-xl border border-sky-700 bg-sky-950/40 text-sky-100 p-3 text-sm">
-          {liveNotice}
+        <div className="rounded-xl border border-sky-700 bg-sky-950/40 text-sky-100 p-3 text-sm flex items-center justify-between gap-3 flex-wrap">
+          <span>{liveNotice}</span>
+          {highlightedRequestAvailable && (
+            <button
+              type="button"
+              onClick={focusHighlightedRequestCard}
+              className="rounded-lg border border-sky-500/60 bg-sky-900/50 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-800/60"
+            >
+              Ir para solicitação
+            </button>
+          )}
         </div>
       )}
 
@@ -301,7 +323,9 @@ export default function ClientRequestsPage() {
           ) : payload.requests.map((item) => (
             <div
               key={item.id}
-              className={`bg-slate-800 border rounded-xl p-4 space-y-3 transition ${highlightedRequestId === item.id ? 'border-sky-500 shadow-[0_0_0_1px_rgba(56,189,248,0.45)]' : 'border-slate-700'}`}
+              id={`request-card-${item.id}`}
+              tabIndex={-1}
+              className={`bg-slate-800 border rounded-xl p-4 space-y-3 transition outline-none ${highlightedRequestId === item.id ? 'border-sky-500 shadow-[0_0_0_1px_rgba(56,189,248,0.45)]' : 'border-slate-700'}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
