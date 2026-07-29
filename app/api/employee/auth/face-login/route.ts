@@ -3,6 +3,7 @@ import pool, { initDb } from '@/lib/db'
 import { COOKIE_NAME, COOKIE_OPTIONS, signToken } from '@/lib/auth'
 import { isValidEmail, normalizeEmail } from '@/lib/security'
 import { getEmployeeFaceLoginThreshold, toFaceConfidencePercent } from '@/lib/faceRecognition'
+import { recordFaceRecognitionEvent } from '@/lib/faceRecognitionMetrics'
 
 const MATCH_THRESHOLD = getEmployeeFaceLoginThreshold()
 
@@ -48,6 +49,17 @@ export async function POST(request: NextRequest) {
     const distance = Number(person.distance)
     const confidence = toFaceConfidencePercent(distance, MATCH_THRESHOLD)
     if (!Number.isFinite(distance) || distance >= MATCH_THRESHOLD) {
+      await recordFaceRecognitionEvent({
+        scenario: 'employee_login',
+        accepted: false,
+        clientId: person.client_id ? Number(person.client_id) : null,
+        personId: Number(person.id),
+        obraId: person.obra_id != null ? Number(person.obra_id) : null,
+        distance: Number.isFinite(distance) ? distance : null,
+        threshold: MATCH_THRESHOLD,
+        confidencePercent: confidence,
+        reason: Number.isFinite(distance) ? 'face_distance_above_threshold' : 'face_distance_invalid',
+      })
       console.warn(
         `[employee.face-login] reject person=${person.id} distance=${Number.isFinite(distance) ? distance.toFixed(4) : 'NaN'} threshold=${MATCH_THRESHOLD.toFixed(4)} confidence=${confidence}`
       )
@@ -57,6 +69,18 @@ export async function POST(request: NextRequest) {
         faceThreshold: Number(MATCH_THRESHOLD.toFixed(4)),
       }, { status: 401 })
     }
+
+    await recordFaceRecognitionEvent({
+      scenario: 'employee_login',
+      accepted: true,
+      clientId: person.client_id ? Number(person.client_id) : null,
+      personId: Number(person.id),
+      obraId: person.obra_id != null ? Number(person.obra_id) : null,
+      distance,
+      threshold: MATCH_THRESHOLD,
+      confidencePercent: confidence,
+      reason: 'ok',
+    })
 
     console.info(
       `[employee.face-login] accept person=${person.id} distance=${distance.toFixed(4)} threshold=${MATCH_THRESHOLD.toFixed(4)} confidence=${confidence}`

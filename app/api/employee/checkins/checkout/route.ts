@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { getCheckinMaxDistanceMeters, haversineDistanceMeters } from '@/lib/geo'
 import { isValidEmail, normalizeEmail } from '@/lib/security'
 import { getAttendanceFaceThreshold, toFaceConfidencePercent } from '@/lib/faceRecognition'
+import { recordFaceRecognitionEvent } from '@/lib/faceRecognitionMetrics'
 
 const FACE_THRESHOLD = getAttendanceFaceThreshold()
 
@@ -77,6 +78,19 @@ export async function POST(request: NextRequest) {
     const distanceMeters = Math.round(haversineDistanceMeters(lat, lng, obraLat, obraLng))
     const maxDistanceMeters = getCheckinMaxDistanceMeters()
     if (distanceMeters > maxDistanceMeters) {
+      await recordFaceRecognitionEvent({
+        scenario: 'checkout',
+        accepted: false,
+        clientId: auth.clientId ? Number(auth.clientId) : null,
+        personId: Number(auth.employeeId),
+        obraId,
+        threshold: FACE_THRESHOLD,
+        reason: 'geo_out_of_range',
+        metadata: {
+          geoDistanceMeters: distanceMeters,
+          maxDistanceMeters,
+        },
+      })
       return NextResponse.json(
         {
           error: `Você está fora do raio permitido para esta obra (${distanceMeters}m). Máximo: ${maxDistanceMeters}m.`,
@@ -100,11 +114,34 @@ export async function POST(request: NextRequest) {
       [vectorStr, Number(auth.employeeId), email]
     )
     if (!faceCheck.rowCount) {
+      await recordFaceRecognitionEvent({
+        scenario: 'checkout',
+        accepted: false,
+        clientId: auth.clientId ? Number(auth.clientId) : null,
+        personId: Number(auth.employeeId),
+        obraId,
+        threshold: FACE_THRESHOLD,
+        reason: 'face_not_enabled',
+      })
       return NextResponse.json({ error: 'Reconhecimento facial não habilitado para este usuário.' }, { status: 403 })
     }
     const faceDistance = Number(faceCheck.rows[0].face_distance)
     const faceConfidencePercent = toFaceConfidencePercent(faceDistance, FACE_THRESHOLD)
     if (!Number.isFinite(faceDistance) || faceDistance >= FACE_THRESHOLD) {
+      await recordFaceRecognitionEvent({
+        scenario: 'checkout',
+        accepted: false,
+        clientId: auth.clientId ? Number(auth.clientId) : null,
+        personId: Number(auth.employeeId),
+        obraId,
+        distance: Number.isFinite(faceDistance) ? faceDistance : null,
+        threshold: FACE_THRESHOLD,
+        confidencePercent: faceConfidencePercent,
+        reason: Number.isFinite(faceDistance) ? 'face_distance_above_threshold' : 'face_distance_invalid',
+        metadata: {
+          geoDistanceMeters: distanceMeters,
+        },
+      })
       console.warn(
         `[employee.checkout] facial_reject person=${auth.employeeId} distance=${Number.isFinite(faceDistance) ? faceDistance.toFixed(4) : 'NaN'} threshold=${FACE_THRESHOLD.toFixed(4)} confidence=${faceConfidencePercent}`
       )
@@ -118,6 +155,21 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    await recordFaceRecognitionEvent({
+      scenario: 'checkout',
+      accepted: true,
+      clientId: auth.clientId ? Number(auth.clientId) : null,
+      personId: Number(auth.employeeId),
+      obraId,
+      distance: faceDistance,
+      threshold: FACE_THRESHOLD,
+      confidencePercent: faceConfidencePercent,
+      reason: 'ok',
+      metadata: {
+        geoDistanceMeters: distanceMeters,
+      },
+    })
 
     console.info(
       `[employee.checkout] facial_accept person=${auth.employeeId} distance=${faceDistance.toFixed(4)} threshold=${FACE_THRESHOLD.toFixed(4)} confidence=${faceConfidencePercent} geoDistance=${distanceMeters}`

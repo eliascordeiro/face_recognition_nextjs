@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { initDb } from '@/lib/db'
 import { getAuthUser } from '@/lib/auth'
 import { getRecognizeFaceThreshold, toFaceConfidencePercent } from '@/lib/faceRecognition'
+import { recordFaceRecognitionEvent } from '@/lib/faceRecognitionMetrics'
 
 const RECOGNIZE_THRESHOLD = getRecognizeFaceThreshold()
 
@@ -46,6 +47,17 @@ export async function POST(request: NextRequest) {
     const dist = parseFloat(distance)
     const match = dist < RECOGNIZE_THRESHOLD
     const confidence = toFaceConfidencePercent(dist, RECOGNIZE_THRESHOLD)
+
+    await recordFaceRecognitionEvent({
+      scenario: 'recognize',
+      accepted: match,
+      clientId: Number(auth.clientId),
+      personId: Number(id),
+      distance: dist,
+      threshold: RECOGNIZE_THRESHOLD,
+      confidencePercent: confidence,
+      reason: match ? 'ok' : 'face_distance_above_threshold',
+    })
 
     console.info(
       `[recognize] client=${auth.clientId} person=${id} match=${match} distance=${dist.toFixed(4)} threshold=${RECOGNIZE_THRESHOLD.toFixed(4)} confidence=${confidence}`

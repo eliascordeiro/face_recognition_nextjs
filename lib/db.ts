@@ -183,6 +183,40 @@ export async function initDb(): Promise<void> {
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_person_idx ON employee_checkins (person_id, checkin_at DESC)`)
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_client_idx ON employee_checkins (client_id, checkin_at DESC)`)
 
+    // Telemetria operacional para calibração de limiares faciais por cenário
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS face_recognition_events (
+        id SERIAL PRIMARY KEY,
+        scenario VARCHAR(30) NOT NULL,
+        accepted BOOLEAN NOT NULL,
+        client_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        person_id INTEGER REFERENCES persons(id) ON DELETE SET NULL,
+        obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL,
+        distance NUMERIC(8,6),
+        threshold NUMERIC(8,6),
+        confidence_percent INTEGER,
+        reason VARCHAR(40),
+        metadata JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS scenario VARCHAR(30)`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS accepted BOOLEAN`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS person_id INTEGER REFERENCES persons(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS distance NUMERIC(8,6)`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS threshold NUMERIC(8,6)`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS confidence_percent INTEGER`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS reason VARCHAR(40)`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS metadata JSONB`)
+    await client.query(`ALTER TABLE face_recognition_events ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`)
+    await client.query(`UPDATE face_recognition_events SET accepted = FALSE WHERE accepted IS NULL`)
+    await client.query(`ALTER TABLE face_recognition_events ALTER COLUMN accepted SET NOT NULL`)
+    await client.query(`CREATE INDEX IF NOT EXISTS face_recognition_events_created_idx ON face_recognition_events (created_at DESC)`)
+    await client.query(`CREATE INDEX IF NOT EXISTS face_recognition_events_scenario_idx ON face_recognition_events (scenario, created_at DESC)`)
+    await client.query(`CREATE INDEX IF NOT EXISTS face_recognition_events_client_idx ON face_recognition_events (client_id, scenario, created_at DESC)`)
+
     // ── Gastos / comprovantes ───────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS construction_expenses (
