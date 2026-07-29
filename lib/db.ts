@@ -183,6 +183,67 @@ export async function initDb(): Promise<void> {
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_person_idx ON employee_checkins (person_id, checkin_at DESC)`)
     await client.query(`CREATE INDEX IF NOT EXISTS employee_checkins_client_idx ON employee_checkins (client_id, checkin_at DESC)`)
 
+    // ── Solicitações do funcionário (adiantamentos/ocorrências) ─────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS employee_requests (
+        id SERIAL PRIMARY KEY,
+        client_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        employee_id INTEGER NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
+        obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL,
+        type VARCHAR(30) NOT NULL DEFAULT 'advance',
+        title VARCHAR(160) NOT NULL,
+        description TEXT,
+        amount_cents INTEGER,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        manager_note TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        resolved_at TIMESTAMP WITH TIME ZONE
+      )
+    `)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS employee_id INTEGER REFERENCES persons(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS obra_id INTEGER REFERENCES obras(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS type VARCHAR(30) NOT NULL DEFAULT 'advance'`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS title VARCHAR(160)`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS description TEXT`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS amount_cents INTEGER`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'pending'`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS manager_note TEXT`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`)
+    await client.query(`ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE`)
+    await client.query(`UPDATE employee_requests SET title = 'Solicitação sem título' WHERE title IS NULL OR BTRIM(title) = ''`)
+    await client.query(`ALTER TABLE employee_requests ALTER COLUMN title SET NOT NULL`)
+    await client.query(`CREATE INDEX IF NOT EXISTS employee_requests_client_status_idx ON employee_requests (client_id, status, created_at DESC)`)
+    await client.query(`CREATE INDEX IF NOT EXISTS employee_requests_employee_idx ON employee_requests (employee_id, created_at DESC)`)
+
+    // Fila de notificações in-app para gestor (cliente)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS manager_notifications (
+        id SERIAL PRIMARY KEY,
+        client_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        request_id INTEGER REFERENCES employee_requests(id) ON DELETE CASCADE,
+        title VARCHAR(180) NOT NULL,
+        message TEXT NOT NULL,
+        is_read BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        read_at TIMESTAMP WITH TIME ZONE
+      )
+    `)
+    await client.query(`ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS request_id INTEGER REFERENCES employee_requests(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS title VARCHAR(180)`)
+    await client.query(`ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS message TEXT`)
+    await client.query(`ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT FALSE`)
+    await client.query(`ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`)
+    await client.query(`ALTER TABLE manager_notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMP WITH TIME ZONE`)
+    await client.query(`UPDATE manager_notifications SET title = 'Notificação' WHERE title IS NULL OR BTRIM(title) = ''`)
+    await client.query(`UPDATE manager_notifications SET message = 'Sem mensagem' WHERE message IS NULL OR BTRIM(message) = ''`)
+    await client.query(`ALTER TABLE manager_notifications ALTER COLUMN title SET NOT NULL`)
+    await client.query(`ALTER TABLE manager_notifications ALTER COLUMN message SET NOT NULL`)
+    await client.query(`CREATE INDEX IF NOT EXISTS manager_notifications_client_idx ON manager_notifications (client_id, is_read, created_at DESC)`)
+
     // Telemetria operacional para calibração de limiares faciais por cenário
     await client.query(`
       CREATE TABLE IF NOT EXISTS face_recognition_events (

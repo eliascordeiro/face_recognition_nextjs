@@ -27,6 +27,27 @@ interface CheckinRecord {
   notes?: string | null
 }
 
+interface EmployeeRequest {
+  id: number
+  type: 'advance' | 'occurrence' | 'absence' | 'material_request'
+  title: string
+  description: string | null
+  amount_cents: number | null
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  manager_note: string | null
+  created_at: string
+  updated_at: string
+  resolved_at: string | null
+  obra_name: string | null
+}
+
+type EmployeeTab = 'services' | 'requests' | 'history'
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
+}
+
 export default function EmployeeHomePage() {
   const router = useRouter()
   const [me, setMe] = useState<EmployeeMe | null>(null)
@@ -39,6 +60,19 @@ export default function EmployeeHomePage() {
   const [cameraOn, setCameraOn] = useState(false)
   const [showFacePanel, setShowFacePanel] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<EmployeeTab>('services')
+  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null)
+
+  const [requestLoading, setRequestLoading] = useState(false)
+  const [requestSaving, setRequestSaving] = useState(false)
+  const [requestMessage, setRequestMessage] = useState<string | null>(null)
+  const [requests, setRequests] = useState<EmployeeRequest[]>([])
+  const [requestForm, setRequestForm] = useState({
+    type: 'advance' as EmployeeRequest['type'],
+    title: '',
+    amount: '',
+    description: '',
+  })
 
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null)
   const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null)
@@ -68,6 +102,16 @@ export default function EmployeeHomePage() {
   }, [router])
 
   useEffect(() => {
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPromptEvent(event as BeforeInstallPromptEvent)
+    }
+
+    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt)
+    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt)
+  }, [])
+
+  useEffect(() => {
     return () => {
       stream?.getTracks().forEach((t) => t.stop())
     }
@@ -94,11 +138,13 @@ export default function EmployeeHomePage() {
     return () => { cancelled = true }
   }, [])
 
+  useEffect(() => {
+    if (!me) return
+    loadRequests()
+  }, [me?.id])
+
   async function ensureCameraOn() {
     if (stream) return true
-    if (!navigator.geolocation) {
-      // noop; handled elsewhere. Keep camera independent of geolocation support.
-    }
     try {
       const media = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
@@ -164,6 +210,22 @@ export default function EmployeeHomePage() {
     const data = await res.json()
     setOpenCheckin(data.openCheckin ?? null)
     setHistory(Array.isArray(data.history) ? data.history : [])
+  }
+
+  async function loadRequests() {
+    setRequestLoading(true)
+    try {
+      const res = await fetch('/api/employee/requests')
+      const data = await res.json().catch(() => null) as EmployeeRequest[] | { error?: string } | null
+      if (!res.ok || !Array.isArray(data)) {
+        setRequestMessage((data && !Array.isArray(data) && typeof data.error === 'string') ? data.error : 'Falha ao carregar solicitações.')
+        setRequests([])
+        return
+      }
+      setRequests(data)
+    } finally {
+      setRequestLoading(false)
+    }
   }
 
   async function registerCheckin() {
@@ -234,6 +296,64 @@ export default function EmployeeHomePage() {
     }
   }
 
+  async function submitRequest() {
+    setRequestSaving(true)
+    setRequestMessage(null)
+    try {
+      const payload = {
+        type: requestForm.type,
+        title: requestForm.title,
+        amount: requestForm.type === 'advance' ? requestForm.amount : null,
+        description: requestForm.description,
+      }
+
+      const res = await fetch('/api/employee/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => null) as { error?: string } | EmployeeRequest | null
+      if (!res.ok) {
+        setRequestMessage((data && 'error' in data && typeof data.error === 'string') ? data.error : 'Falha ao enviar solicitação.')
+        return
+      }
+
+      setRequestForm({ type: 'advance', title: '', amount: '', description: '' })
+      setRequestMessage('Solicitação enviada para o gestor.')
+      await loadRequests()
+    } finally {
+      setRequestSaving(false)
+    }
+  }
+
+  async function cancelRequest(id: number) {
+    setRequestSaving(true)
+    setRequestMessage(null)
+    try {
+      const res = await fetch(`/api/employee/requests/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel' }),
+      })
+      const data = await res.json().catch(() => null) as { error?: string } | null
+      if (!res.ok) {
+        setRequestMessage(data?.error ?? 'Não foi possível cancelar.')
+        return
+      }
+      setRequestMessage('Solicitação cancelada com sucesso.')
+      await loadRequests()
+    } finally {
+      setRequestSaving(false)
+    }
+  }
+
+  async function requestInstallPrompt() {
+    if (!installPromptEvent) return
+    await installPromptEvent.prompt()
+    await installPromptEvent.userChoice.catch(() => undefined)
+    setInstallPromptEvent(null)
+  }
+
   function formatDateTime(value: string | null) {
     if (!value) return '—'
     const d = new Date(value)
@@ -246,11 +366,39 @@ export default function EmployeeHomePage() {
     })
   }
 
+  function formatMoney(cents: number | null | undefined) {
+    if (cents == null) return '—'
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100)
+  }
+
+  function formatRequestType(type: EmployeeRequest['type']) {
+    if (type === 'advance') return 'Adiantamento'
+    if (type === 'occurrence') return 'Ocorrência'
+    if (type === 'absence') return 'Ausência'
+    return 'Material'
+  }
+
+  function formatRequestStatus(status: EmployeeRequest['status']) {
+    if (status === 'pending') return 'Pendente'
+    if (status === 'approved') return 'Aprovada'
+    if (status === 'rejected') return 'Rejeitada'
+    return 'Cancelada'
+  }
+
+  function requestStatusClass(status: EmployeeRequest['status']) {
+    if (status === 'pending') return 'border-amber-700 bg-amber-900/20 text-amber-300'
+    if (status === 'approved') return 'border-emerald-700 bg-emerald-900/20 text-emerald-300'
+    if (status === 'rejected') return 'border-rose-700 bg-rose-900/20 text-rose-300'
+    return 'border-slate-600 bg-slate-900/40 text-slate-300'
+  }
+
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' })
     router.replace('/employee/login')
     router.refresh()
   }
+
+  const pendingRequests = requests.filter((item) => item.status === 'pending').length
 
   if (loading) {
     return (
@@ -274,123 +422,261 @@ export default function EmployeeHomePage() {
             <p>🏗️ {me?.obraName ?? 'Sem obra vinculada'}</p>
             <p>🛠️ {me?.roleName ?? 'Função não informada'}</p>
           </div>
-        </div>
 
-        <div className="auth-panel p-4 space-y-3">
-          <h2 className="text-white font-semibold">Serviços</h2>
-
-          <button
-            type="button"
-            onClick={() => {
-              setShowFacePanel((v) => {
-                const next = !v
-                if (!next && stream) {
-                  stream.getTracks().forEach((t) => t.stop())
-                  setStream(null)
-                  setCameraOn(false)
-                }
-                return next
-              })
-            }}
-            className="w-full rounded-xl border border-slate-600 bg-slate-800/60 px-4 py-2 text-left"
-          >
-            <p className="text-slate-100 text-sm font-medium">🛡️ Confirmação facial para presença</p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {faceReady ? (cameraOn ? 'Câmera pronta para validação' : 'Toque para preparar a câmera') : 'Carregando modelos de IA...'}
-            </p>
-          </button>
-
-          {showFacePanel && (
-            <div className="rounded-xl border border-slate-600 bg-slate-800/60 px-3 py-3 space-y-2">
-              <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
-                <video
-                  ref={(el) => setVideoEl(el)}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover"
-                />
-                {!cameraOn && (
-                  <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-xs">
-                    Câmera desligada
-                  </div>
-                )}
-              </div>
-              <canvas ref={(el) => setCanvasEl(el)} className="hidden" />
-              <button
-                type="button"
-                onClick={ensureCameraOn}
-                disabled={!faceReady || faceLoading}
-                className="w-full rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-100 py-2 text-sm font-semibold"
-              >
-                {cameraOn ? 'Câmera pronta' : 'Ligar câmera'}
-              </button>
-            </div>
-          )}
-
-          <div className="w-full rounded-xl border border-slate-600 bg-slate-800/60 px-4 py-3">
-            <p className="text-slate-100 font-medium">📍 Presença na obra</p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {openCheckin
-                ? `Entrada ativa desde ${formatDateTime(openCheckin.checkin_at)}`
-                : 'Nenhuma entrada ativa no momento'}
-            </p>
-            <div className="mt-3 grid grid-cols-1 gap-2">
-              {!openCheckin ? (
-                <button
-                  type="button"
-                  onClick={registerCheckin}
-                  disabled={checkinLoading || faceLoading || !faceReady || !cameraOn || !me?.email}
-                  className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-2 text-sm font-semibold"
-                >
-                  {checkinLoading ? 'Registrando…' : 'Registrar entrada'}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={registerCheckout}
-                  disabled={checkinLoading || faceLoading || !faceReady || !cameraOn || !me?.email}
-                  className="w-full rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white py-2 text-sm font-semibold"
-                >
-                  {checkinLoading ? 'Registrando…' : 'Registrar saída'}
-                </button>
-              )}
-            </div>
-            {checkinMessage && (
-              <p className="text-xs text-slate-300 mt-2">{checkinMessage}</p>
-            )}
+          <div className="mt-4 flex items-center gap-2 overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setActiveTab('services')}
+              className={`rounded-full px-3 py-1.5 text-xs border ${activeTab === 'services' ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-900/70 border-slate-700 text-slate-300'}`}
+            >
+              Serviços
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('requests')}
+              className={`rounded-full px-3 py-1.5 text-xs border ${activeTab === 'requests' ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-900/70 border-slate-700 text-slate-300'}`}
+            >
+              Solicitações {pendingRequests > 0 ? `(${pendingRequests})` : ''}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('history')}
+              className={`rounded-full px-3 py-1.5 text-xs border ${activeTab === 'history' ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-900/70 border-slate-700 text-slate-300'}`}
+            >
+              Histórico
+            </button>
           </div>
 
-          <button
-            type="button"
-            className="w-full rounded-xl border border-slate-600 bg-slate-800/60 px-4 py-3 text-left"
-          >
-            <p className="text-slate-100 font-medium">📝 Solicitações e ocorrências</p>
-            <p className="text-xs text-slate-400 mt-0.5">Em breve</p>
-          </button>
-
-          <button
-            type="button"
-            className="w-full rounded-xl border border-slate-600 bg-slate-800/60 px-4 py-3 text-left"
-          >
-            <p className="text-slate-100 font-medium">📎 Documentos da equipe</p>
-            <p className="text-xs text-slate-400 mt-0.5">Em breve</p>
-          </button>
-        </div>
-
-        <div className="auth-panel p-4 space-y-2">
-          <h2 className="text-white font-semibold">Últimas batidas</h2>
-          {history.length === 0 ? (
-            <p className="text-xs text-slate-400">Nenhum registro ainda.</p>
-          ) : (
-            history.slice(0, 5).map((item) => (
-              <div key={item.id} className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
-                <p className="text-sm text-slate-200">Entrada: {formatDateTime(item.checkin_at)}</p>
-                <p className="text-xs text-slate-400">Saída: {formatDateTime(item.checkout_at)}</p>
-              </div>
-            ))
+          {installPromptEvent && (
+            <button
+              type="button"
+              onClick={requestInstallPrompt}
+              className="mt-3 w-full rounded-lg bg-sky-600/90 hover:bg-sky-500 text-white py-2 text-sm font-semibold"
+            >
+              Instalar app no celular
+            </button>
           )}
         </div>
+
+        {activeTab === 'services' && (
+          <div className="auth-panel p-4 space-y-3">
+            <h2 className="text-white font-semibold">Serviços</h2>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowFacePanel((v) => {
+                  const next = !v
+                  if (!next && stream) {
+                    stream.getTracks().forEach((t) => t.stop())
+                    setStream(null)
+                    setCameraOn(false)
+                  }
+                  return next
+                })
+              }}
+              className="w-full rounded-xl border border-slate-600 bg-slate-800/60 px-4 py-2 text-left"
+            >
+              <p className="text-slate-100 text-sm font-medium">🛡️ Confirmação facial para presença</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {faceReady ? (cameraOn ? 'Câmera pronta para validação' : 'Toque para preparar a câmera') : 'Carregando modelos de IA...'}
+              </p>
+            </button>
+
+            {showFacePanel && (
+              <div className="rounded-xl border border-slate-600 bg-slate-800/60 px-3 py-3 space-y-2">
+                <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
+                  <video
+                    ref={(el) => setVideoEl(el)}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                  {!cameraOn && (
+                    <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-xs">
+                      Câmera desligada
+                    </div>
+                  )}
+                </div>
+                <canvas ref={(el) => setCanvasEl(el)} className="hidden" />
+                <button
+                  type="button"
+                  onClick={ensureCameraOn}
+                  disabled={!faceReady || faceLoading}
+                  className="w-full rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-100 py-2 text-sm font-semibold"
+                >
+                  {cameraOn ? 'Câmera pronta' : 'Ligar câmera'}
+                </button>
+              </div>
+            )}
+
+            <div className="w-full rounded-xl border border-slate-600 bg-slate-800/60 px-4 py-3">
+              <p className="text-slate-100 font-medium">📍 Presença na obra</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {openCheckin
+                  ? `Entrada ativa desde ${formatDateTime(openCheckin.checkin_at)}`
+                  : 'Nenhuma entrada ativa no momento'}
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-2">
+                {!openCheckin ? (
+                  <button
+                    type="button"
+                    onClick={registerCheckin}
+                    disabled={checkinLoading || faceLoading || !faceReady || !cameraOn || !me?.email}
+                    className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-2 text-sm font-semibold"
+                  >
+                    {checkinLoading ? 'Registrando…' : 'Registrar entrada'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={registerCheckout}
+                    disabled={checkinLoading || faceLoading || !faceReady || !cameraOn || !me?.email}
+                    className="w-full rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white py-2 text-sm font-semibold"
+                  >
+                    {checkinLoading ? 'Registrando…' : 'Registrar saída'}
+                  </button>
+                )}
+              </div>
+              {checkinMessage && (
+                <p className="text-xs text-slate-300 mt-2">{checkinMessage}</p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('requests')}
+              className="w-full rounded-xl border border-slate-600 bg-slate-800/60 px-4 py-3 text-left"
+            >
+              <p className="text-slate-100 font-medium">📝 Solicitações e ocorrências</p>
+              <p className="text-xs text-slate-400 mt-0.5">Abra adiantamentos e acompanhe a aprovação do gestor.</p>
+            </button>
+
+            <button
+              type="button"
+              className="w-full rounded-xl border border-slate-600 bg-slate-800/60 px-4 py-3 text-left"
+            >
+              <p className="text-slate-100 font-medium">📎 Documentos da equipe</p>
+              <p className="text-xs text-slate-400 mt-0.5">Em breve: holerite, ordens de serviço e anexos.</p>
+            </button>
+          </div>
+        )}
+
+        {activeTab === 'requests' && (
+          <div className="auth-panel p-4 space-y-3">
+            <h2 className="text-white font-semibold">Solicitações e ocorrências</h2>
+
+            <div className="rounded-xl border border-slate-600 bg-slate-800/60 p-3 space-y-2">
+              <label className="text-xs text-slate-400 block">Tipo de solicitação</label>
+              <select
+                value={requestForm.type}
+                onChange={(e) => setRequestForm((prev) => ({ ...prev, type: e.target.value as EmployeeRequest['type'] }))}
+                className="w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm text-slate-100"
+              >
+                <option value="advance">Adiantamento</option>
+                <option value="occurrence">Ocorrência</option>
+                <option value="absence">Justificativa de ausência</option>
+                <option value="material_request">Solicitação de material</option>
+              </select>
+
+              <input
+                type="text"
+                value={requestForm.title}
+                onChange={(e) => setRequestForm((prev) => ({ ...prev, title: e.target.value }))}
+                placeholder="Título da solicitação"
+                className="w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm text-slate-100"
+              />
+
+              {requestForm.type === 'advance' && (
+                <input
+                  type="text"
+                  value={requestForm.amount}
+                  onChange={(e) => setRequestForm((prev) => ({ ...prev, amount: e.target.value }))}
+                  placeholder="Valor solicitado (ex.: 500,00)"
+                  className="w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm text-slate-100"
+                />
+              )}
+
+              <textarea
+                rows={3}
+                value={requestForm.description}
+                onChange={(e) => setRequestForm((prev) => ({ ...prev, description: e.target.value }))}
+                placeholder="Descreva o motivo e contexto"
+                className="w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm text-slate-100"
+              />
+
+              <button
+                type="button"
+                onClick={submitRequest}
+                disabled={requestSaving}
+                className="w-full rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white py-2 text-sm font-semibold"
+              >
+                {requestSaving ? 'Enviando...' : 'Enviar para aprovação'}
+              </button>
+            </div>
+
+            {requestMessage && (
+              <p className="text-xs text-slate-300">{requestMessage}</p>
+            )}
+
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400">Minhas solicitações</p>
+              {requestLoading ? (
+                <div className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-3 text-xs text-slate-400">Carregando solicitações...</div>
+              ) : requests.length === 0 ? (
+                <div className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-3 text-xs text-slate-400">Nenhuma solicitação enviada.</div>
+              ) : requests.map((item) => (
+                <div key={item.id} className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-3 space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm text-slate-100 font-medium">{item.title}</p>
+                    <span className={`rounded-full border px-2 py-0.5 text-[11px] ${requestStatusClass(item.status)}`}>
+                      {formatRequestStatus(item.status)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">{formatRequestType(item.type)} • {item.obra_name ?? 'Sem obra'}</p>
+                  {item.description && <p className="text-xs text-slate-300 whitespace-pre-wrap">{item.description}</p>}
+                  <div className="text-xs text-slate-400 flex items-center justify-between gap-2">
+                    <span>Valor: {formatMoney(item.amount_cents)}</span>
+                    <span>{formatDateTime(item.created_at)}</span>
+                  </div>
+                  {item.manager_note && (
+                    <div className="rounded-md border border-slate-600 bg-slate-800/70 px-2 py-1.5">
+                      <p className="text-[11px] text-slate-400">Retorno do gestor</p>
+                      <p className="text-xs text-slate-200 mt-0.5">{item.manager_note}</p>
+                    </div>
+                  )}
+                  {item.status === 'pending' && (
+                    <button
+                      type="button"
+                      onClick={() => cancelRequest(item.id)}
+                      disabled={requestSaving}
+                      className="mt-1 rounded-md px-2.5 py-1 text-xs bg-slate-700 hover:bg-rose-800 text-slate-200"
+                    >
+                      Cancelar solicitação
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'history' && (
+          <div className="auth-panel p-4 space-y-2">
+            <h2 className="text-white font-semibold">Últimas batidas</h2>
+            {history.length === 0 ? (
+              <p className="text-xs text-slate-400">Nenhum registro ainda.</p>
+            ) : (
+              history.slice(0, 12).map((item) => (
+                <div key={item.id} className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
+                  <p className="text-sm text-slate-200">Entrada: {formatDateTime(item.checkin_at)}</p>
+                  <p className="text-xs text-slate-400">Saída: {formatDateTime(item.checkout_at)}</p>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         <button
           type="button"

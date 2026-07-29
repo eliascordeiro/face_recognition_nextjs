@@ -15,6 +15,13 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: 'Obras.com',
   description: 'Plataforma de gestão de obras, usuários e reconhecimento facial',
+  manifest: '/manifest.webmanifest',
+  applicationName: 'Obras.com',
+  appleWebApp: {
+    capable: true,
+    title: 'Obras.com',
+    statusBarStyle: 'black-translucent',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

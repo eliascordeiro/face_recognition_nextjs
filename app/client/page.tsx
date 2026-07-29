@@ -105,6 +105,16 @@ export default function ClientDashboard() {
           </div>
         </button>
         <button
+          onClick={() => router.push('/client/requests')}
+          className="flex items-center gap-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl p-4 text-left transition-all"
+        >
+          <span className="text-2xl">📝</span>
+          <div>
+            <p className="font-medium text-slate-200 text-sm">Solicitações da equipe</p>
+            <p className="text-xs text-slate-500">Adiantamentos, ocorrências e aprovações</p>
+          </div>
+        </button>
+        <button
           onClick={() => router.push('/client/operators')}
           className="flex items-center gap-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl p-4 text-left transition-all"
         >
