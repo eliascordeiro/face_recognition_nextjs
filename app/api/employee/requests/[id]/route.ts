@@ -41,6 +41,17 @@ export async function PATCH(
       return NextResponse.json({ error: 'Solicitação não pode ser cancelada.' }, { status: 409 })
     }
 
+    await pool.query(
+      `INSERT INTO employee_request_events (
+         request_id, client_id, actor_role, actor_employee_id, event_type, message
+       )
+       SELECT r.id, r.client_id, 'employee', r.employee_id, 'cancelled', 'Solicitação cancelada pelo funcionário'
+       FROM employee_requests r
+       WHERE r.id = $1
+       LIMIT 1`,
+      [requestId]
+    )
+
     return NextResponse.json(updated.rows[0])
   } catch {
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 })

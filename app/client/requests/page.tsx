@@ -29,6 +29,14 @@ interface EmployeeRequest {
     height: number | null
     createdAt: string
   }>
+  events: Array<{
+    id: number
+    eventType: string
+    message: string
+    actorRole: string | null
+    createdAt: string
+    metadata?: Record<string, unknown> | null
+  }>
 }
 
 interface ManagerNotification {
@@ -78,6 +86,14 @@ function statusBadgeClass(status: EmployeeRequest['status']) {
 function formatMoney(cents: number | null) {
   if (cents == null) return '—'
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100)
+}
+
+function eventTypeLabel(eventType: string) {
+  if (eventType === 'created') return 'Criação'
+  if (eventType === 'attachment_added') return 'Anexo'
+  if (eventType === 'status_changed') return 'Status'
+  if (eventType === 'cancelled') return 'Cancelamento'
+  return 'Evento'
 }
 
 export default function ClientRequestsPage() {
@@ -259,6 +275,22 @@ export default function ClientRequestsPage() {
                 <div className="rounded-lg border border-slate-600 bg-slate-900/60 p-3">
                   <p className="text-xs text-slate-400">Retorno do gestor</p>
                   <p className="text-sm text-slate-200 mt-1 whitespace-pre-wrap">{item.manager_note}</p>
+                </div>
+              )}
+
+              {item.events.length > 0 && (
+                <div className="rounded-lg border border-slate-700 bg-slate-900/30 p-3 space-y-1">
+                  <p className="text-xs text-slate-400">Linha do tempo</p>
+                  {item.events.slice(-5).reverse().map((eventItem) => (
+                    <div key={eventItem.id} className="text-xs text-slate-300 flex items-start justify-between gap-2">
+                      <span>
+                        <strong className="text-slate-200">{eventTypeLabel(eventItem.eventType)}:</strong> {eventItem.message}
+                      </span>
+                      <span className="text-slate-500 whitespace-nowrap">
+                        {new Date(eventItem.createdAt).toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

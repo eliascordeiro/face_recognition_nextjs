@@ -251,6 +251,35 @@ export async function initDb(): Promise<void> {
     await client.query(`ALTER TABLE employee_request_attachments ALTER COLUMN public_id SET NOT NULL`)
     await client.query(`CREATE INDEX IF NOT EXISTS employee_request_attachments_request_idx ON employee_request_attachments (request_id, created_at ASC)`)
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS employee_request_events (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER NOT NULL REFERENCES employee_requests(id) ON DELETE CASCADE,
+        client_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        actor_role VARCHAR(20),
+        actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        actor_employee_id INTEGER REFERENCES persons(id) ON DELETE SET NULL,
+        event_type VARCHAR(40) NOT NULL,
+        message TEXT NOT NULL,
+        metadata JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `)
+    await client.query(`ALTER TABLE employee_request_events ADD COLUMN IF NOT EXISTS request_id INTEGER REFERENCES employee_requests(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE employee_request_events ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id) ON DELETE CASCADE`)
+    await client.query(`ALTER TABLE employee_request_events ADD COLUMN IF NOT EXISTS actor_role VARCHAR(20)`)
+    await client.query(`ALTER TABLE employee_request_events ADD COLUMN IF NOT EXISTS actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE employee_request_events ADD COLUMN IF NOT EXISTS actor_employee_id INTEGER REFERENCES persons(id) ON DELETE SET NULL`)
+    await client.query(`ALTER TABLE employee_request_events ADD COLUMN IF NOT EXISTS event_type VARCHAR(40)`)
+    await client.query(`ALTER TABLE employee_request_events ADD COLUMN IF NOT EXISTS message TEXT`)
+    await client.query(`ALTER TABLE employee_request_events ADD COLUMN IF NOT EXISTS metadata JSONB`)
+    await client.query(`ALTER TABLE employee_request_events ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`)
+    await client.query(`UPDATE employee_request_events SET event_type = 'note' WHERE event_type IS NULL OR BTRIM(event_type) = ''`)
+    await client.query(`UPDATE employee_request_events SET message = 'Sem descrição' WHERE message IS NULL OR BTRIM(message) = ''`)
+    await client.query(`ALTER TABLE employee_request_events ALTER COLUMN event_type SET NOT NULL`)
+    await client.query(`ALTER TABLE employee_request_events ALTER COLUMN message SET NOT NULL`)
+    await client.query(`CREATE INDEX IF NOT EXISTS employee_request_events_request_idx ON employee_request_events (request_id, created_at ASC)`)
+
     // Fila de notificações in-app para gestor (cliente)
     await client.query(`
       CREATE TABLE IF NOT EXISTS manager_notifications (

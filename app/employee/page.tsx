@@ -51,6 +51,14 @@ interface EmployeeRequest {
     height: number | null
     createdAt: string
   }>
+  events: Array<{
+    id: number
+    eventType: string
+    message: string
+    actorRole: string | null
+    createdAt: string
+    metadata?: Record<string, unknown> | null
+  }>
 }
 
 type EmployeeTab = 'services' | 'requests' | 'history'
@@ -239,20 +247,23 @@ export default function EmployeeHomePage() {
         return
       }
 
-      const previousById = new Map(requests.map((item) => [item.id, item]))
-      const statusTransitions = data
-        .map((item) => {
-          const previous = previousById.get(item.id)
-          if (!previous || previous.status === item.status) return null
-          return `${item.title} foi ${formatRequestStatus(item.status).toLowerCase()}`
-        })
-        .filter((value): value is string => Boolean(value))
+      let statusTransitions: string[] = []
+      setRequests((previous) => {
+        const previousById = new Map(previous.map((item) => [item.id, item]))
+        statusTransitions = data
+          .map((item) => {
+            const before = previousById.get(item.id)
+            if (!before || before.status === item.status) return null
+            return `${item.title} foi ${formatRequestStatus(item.status).toLowerCase()}`
+          })
+          .filter((value): value is string => Boolean(value))
+        return data
+      })
 
       if (statusTransitions.length > 0) {
         setRequestUpdateNotice(statusTransitions.slice(0, 2).join(' • '))
       }
 
-      setRequests(data)
       setRequestLastSync(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
     } finally {
       setRequestLoading(false)
@@ -266,7 +277,7 @@ export default function EmployeeHomePage() {
     }, 25000)
 
     return () => window.clearInterval(timer)
-  }, [me?.id, requests])
+  }, [me?.id])
 
   async function uploadRequestAttachment(file: File) {
     const body = new FormData()
@@ -484,6 +495,14 @@ export default function EmployeeHomePage() {
     if (status === 'approved') return 'border-emerald-700 bg-emerald-900/20 text-emerald-300'
     if (status === 'rejected') return 'border-rose-700 bg-rose-900/20 text-rose-300'
     return 'border-slate-600 bg-slate-900/40 text-slate-300'
+  }
+
+  function eventTypeLabel(eventType: string) {
+    if (eventType === 'created') return 'Criação'
+    if (eventType === 'attachment_added') return 'Anexo'
+    if (eventType === 'status_changed') return 'Status'
+    if (eventType === 'cancelled') return 'Cancelamento'
+    return 'Evento'
   }
 
   async function logout() {
@@ -795,6 +814,19 @@ export default function EmployeeHomePage() {
                     <div className="rounded-md border border-slate-600 bg-slate-800/70 px-2 py-1.5">
                       <p className="text-[11px] text-slate-400">Retorno do gestor</p>
                       <p className="text-xs text-slate-200 mt-0.5">{item.manager_note}</p>
+                    </div>
+                  )}
+                  {item.events.length > 0 && (
+                    <div className="rounded-md border border-slate-700 bg-slate-900/30 px-2 py-2 space-y-1">
+                      <p className="text-[11px] text-slate-400">Linha do tempo</p>
+                      {item.events.slice(-4).reverse().map((eventItem) => (
+                        <div key={eventItem.id} className="text-[11px] text-slate-300 flex items-start justify-between gap-2">
+                          <span>
+                            <strong className="text-slate-200">{eventTypeLabel(eventItem.eventType)}:</strong> {eventItem.message}
+                          </span>
+                          <span className="text-slate-500 whitespace-nowrap">{formatDateTime(eventItem.createdAt)}</span>
+                        </div>
+                      ))}
                     </div>
                   )}
                   {item.status === 'pending' && (

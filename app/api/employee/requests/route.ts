@@ -50,28 +50,45 @@ export async function GET() {
       `SELECT r.id, r.type, r.title, r.description, r.amount_cents, r.status,
               r.manager_note, r.created_at, r.updated_at, r.resolved_at,
               o.name AS obra_name,
-              COALESCE(
-                json_agg(
-                  json_build_object(
-                    'id', a.id,
-                    'url', a.url,
-                    'publicId', a.public_id,
-                    'originalFilename', a.original_filename,
-                    'mimeType', a.mime_type,
-                    'format', a.format,
-                    'bytes', a.bytes,
-                    'width', a.width,
-                    'height', a.height,
-                    'createdAt', a.created_at
-                  )
-                  ORDER BY a.created_at ASC
-                ) FILTER (WHERE a.id IS NOT NULL), '[]'::json
-              ) AS attachments
+              COALESCE(att.attachments, '[]'::json) AS attachments,
+              COALESCE(evt.events, '[]'::json) AS events
        FROM employee_requests r
        LEFT JOIN obras o ON o.id = r.obra_id
-       LEFT JOIN employee_request_attachments a ON a.request_id = r.id
+       LEFT JOIN LATERAL (
+         SELECT json_agg(
+           json_build_object(
+             'id', a.id,
+             'url', a.url,
+             'publicId', a.public_id,
+             'originalFilename', a.original_filename,
+             'mimeType', a.mime_type,
+             'format', a.format,
+             'bytes', a.bytes,
+             'width', a.width,
+             'height', a.height,
+             'createdAt', a.created_at
+           )
+           ORDER BY a.created_at ASC
+         ) AS attachments
+         FROM employee_request_attachments a
+         WHERE a.request_id = r.id
+       ) att ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT json_agg(
+           json_build_object(
+             'id', e.id,
+             'eventType', e.event_type,
+             'message', e.message,
+             'actorRole', e.actor_role,
+             'createdAt', e.created_at,
+             'metadata', e.metadata
+           )
+           ORDER BY e.created_at ASC
+         ) AS events
+         FROM employee_request_events e
+         WHERE e.request_id = r.id
+       ) evt ON TRUE
        WHERE r.employee_id = $1
-       GROUP BY r.id, o.name
        ORDER BY r.created_at DESC
        LIMIT 40`,
       [Number(auth.employeeId)]
@@ -136,6 +153,23 @@ export async function POST(request: NextRequest) {
     )
 
     const requestRow = created.rows[0]
+    await pool.query(
+      `INSERT INTO employee_request_events (
+         request_id, client_id, actor_role, actor_employee_id, event_type, message, metadata
+       )
+       VALUES ($1, $2, 'employee', $3, 'created', $4, $5::jsonb)`,
+      [
+        Number(requestRow.id),
+        Number(auth.clientId),
+        Number(auth.employeeId),
+        `Solicitação criada: ${title}`,
+        JSON.stringify({
+          type,
+          amountCents: type === 'advance' ? amountCents : null,
+        }),
+      ]
+    )
+
     for (const attachment of attachments) {
       if (!attachment || typeof attachment !== 'object') continue
       const typed = attachment as Record<string, unknown>
@@ -157,6 +191,23 @@ export async function POST(request: NextRequest) {
           typeof typed.bytes === 'number' ? Math.round(typed.bytes) : null,
           typeof typed.width === 'number' ? Math.round(typed.width) : null,
           typeof typed.height === 'number' ? Math.round(typed.height) : null,
+        ]
+      )
+
+      await pool.query(
+        `INSERT INTO employee_request_events (
+           request_id, client_id, actor_role, actor_employee_id, event_type, message, metadata
+         )
+         VALUES ($1, $2, 'employee', $3, 'attachment_added', $4, $5::jsonb)`,
+        [
+          Number(requestRow.id),
+          Number(auth.clientId),
+          Number(auth.employeeId),
+          `Anexo adicionado: ${typeof typed.originalFilename === 'string' ? typed.originalFilename : 'arquivo'}`,
+          JSON.stringify({
+            originalFilename: typeof typed.originalFilename === 'string' ? typed.originalFilename : null,
+            mimeType: typeof typed.mimeType === 'string' ? typed.mimeType : null,
+          }),
         ]
       )
     }

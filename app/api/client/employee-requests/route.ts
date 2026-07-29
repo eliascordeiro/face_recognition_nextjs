@@ -47,29 +47,46 @@ export async function GET(request: NextRequest) {
               r.manager_note, r.created_at, r.updated_at, r.resolved_at,
               p.id AS employee_id, p.name AS employee_name,
               o.id AS obra_id, o.name AS obra_name,
-              COALESCE(
-                json_agg(
-                  json_build_object(
-                    'id', a.id,
-                    'url', a.url,
-                    'publicId', a.public_id,
-                    'originalFilename', a.original_filename,
-                    'mimeType', a.mime_type,
-                    'format', a.format,
-                    'bytes', a.bytes,
-                    'width', a.width,
-                    'height', a.height,
-                    'createdAt', a.created_at
-                  )
-                  ORDER BY a.created_at ASC
-                ) FILTER (WHERE a.id IS NOT NULL), '[]'::json
-              ) AS attachments
+              COALESCE(att.attachments, '[]'::json) AS attachments,
+              COALESCE(evt.events, '[]'::json) AS events
        FROM employee_requests r
        INNER JOIN persons p ON p.id = r.employee_id
        LEFT JOIN obras o ON o.id = r.obra_id
-       LEFT JOIN employee_request_attachments a ON a.request_id = r.id
+       LEFT JOIN LATERAL (
+         SELECT json_agg(
+           json_build_object(
+             'id', a.id,
+             'url', a.url,
+             'publicId', a.public_id,
+             'originalFilename', a.original_filename,
+             'mimeType', a.mime_type,
+             'format', a.format,
+             'bytes', a.bytes,
+             'width', a.width,
+             'height', a.height,
+             'createdAt', a.created_at
+           )
+           ORDER BY a.created_at ASC
+         ) AS attachments
+         FROM employee_request_attachments a
+         WHERE a.request_id = r.id
+       ) att ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT json_agg(
+           json_build_object(
+             'id', e.id,
+             'eventType', e.event_type,
+             'message', e.message,
+             'actorRole', e.actor_role,
+             'createdAt', e.created_at,
+             'metadata', e.metadata
+           )
+           ORDER BY e.created_at ASC
+         ) AS events
+         FROM employee_request_events e
+         WHERE e.request_id = r.id
+       ) evt ON TRUE
        ${whereSql}
-       GROUP BY r.id, p.id, o.id
        ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END, r.created_at DESC
        LIMIT 120`,
       params
@@ -156,6 +173,29 @@ export async function PATCH(request: NextRequest) {
     if (!updated.rowCount) {
       return NextResponse.json({ error: 'Solicitação não encontrada.' }, { status: 404 })
     }
+
+    const actorUserId = Number(auth.sub)
+    await pool.query(
+      `INSERT INTO employee_request_events (
+         request_id, client_id, actor_role, actor_user_id, event_type, message, metadata
+       )
+       SELECT r.id, r.client_id, $2, $3, 'status_changed', $4, $5::jsonb
+       FROM employee_requests r
+       WHERE r.id = $1
+       LIMIT 1`,
+      [
+        requestId,
+        auth.role,
+        Number.isFinite(actorUserId) ? actorUserId : null,
+        managerNote
+          ? `Status alterado para ${status} com observação do gestor`
+          : `Status alterado para ${status}`,
+        JSON.stringify({
+          status,
+          managerNote,
+        }),
+      ]
+    )
 
     return NextResponse.json(updated.rows[0])
   } catch {
