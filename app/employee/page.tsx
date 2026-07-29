@@ -82,6 +82,7 @@ export default function EmployeeHomePage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<EmployeeTab>('services')
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null)
+  const [showIosInstallHint, setShowIosInstallHint] = useState(false)
 
   const [requestLoading, setRequestLoading] = useState(false)
   const [requestSaving, setRequestSaving] = useState(false)
@@ -133,6 +134,14 @@ export default function EmployeeHomePage() {
 
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt)
     return () => window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt)
+  }, [])
+
+  useEffect(() => {
+    const ua = window.navigator.userAgent.toLowerCase()
+    const isIos = /iphone|ipad|ipod/.test(ua)
+    const iosStandalone = Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone)
+    const displayStandalone = window.matchMedia('(display-mode: standalone)').matches
+    setShowIosInstallHint(isIos && !iosStandalone && !displayStandalone)
   }, [])
 
   useEffect(() => {
@@ -600,6 +609,15 @@ export default function EmployeeHomePage() {
             >
               Instalar app no celular
             </button>
+          )}
+
+          {!installPromptEvent && showIosInstallHint && (
+            <div className="mt-3 rounded-lg border border-sky-700/60 bg-sky-950/30 p-3">
+              <p className="text-xs text-sky-200 font-semibold">Instalação no iPhone/iPad</p>
+              <p className="text-xs text-slate-300 mt-1">
+                Toque em <strong>Compartilhar</strong> no Safari e depois em <strong>Adicionar à Tela de Início</strong>.
+              </p>
+            </div>
           )}
         </div>
 

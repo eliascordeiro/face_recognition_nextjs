@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Plus_Jakarta_Sans, Space_Grotesk } from 'next/font/google'
+import PwaRegister from './components/pwa-register'
 import './globals.css'
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -27,7 +28,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body className={`${plusJakarta.variable} ${spaceGrotesk.variable} font-[var(--font-body)]`}>{children}</body>
+      <body className={`${plusJakarta.variable} ${spaceGrotesk.variable} font-[var(--font-body)]`}>
+        <PwaRegister />
+        {children}
+      </body>
     </html>
   )
 }
