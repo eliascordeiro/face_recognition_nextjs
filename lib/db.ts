@@ -200,6 +200,9 @@ export async function initDb(): Promise<void> {
         receipt_total_cents INTEGER,
         receipt_ocr_text TEXT,
         ocr_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        receipt_classification_source VARCHAR(20),
+        receipt_classification_reason VARCHAR(30),
+        receipt_classification_confidence NUMERIC(4,3),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )
     `)
@@ -215,6 +218,9 @@ export async function initDb(): Promise<void> {
     await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_total_cents INTEGER`)
     await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_ocr_text TEXT`)
     await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS ocr_status VARCHAR(20) NOT NULL DEFAULT 'pending'`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_classification_source VARCHAR(20)`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_classification_reason VARCHAR(30)`)
+    await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_classification_confidence NUMERIC(4,3)`)
     await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_image_url TEXT`)
     await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_image_public_id VARCHAR(255)`)
     await client.query(`ALTER TABLE construction_expenses ADD COLUMN IF NOT EXISTS receipt_image_format VARCHAR(30)`)

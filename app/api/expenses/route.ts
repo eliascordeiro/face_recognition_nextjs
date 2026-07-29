@@ -4,6 +4,8 @@ import { getAuthUser } from '@/lib/auth'
 import { logExpenseAudit } from '@/lib/expenseAudit'
 
 const VALID_CATEGORIES = ['material', 'alimentacao', 'transporte', 'equipamento', 'servico', 'outros']
+const VALID_CLASSIFICATION_SOURCES = ['ai', 'heuristic'] as const
+const VALID_CLASSIFICATION_REASONS = ['disabled', 'missing_api_key', 'timeout', 'invalid_api_key', 'insufficient_quota', 'rate_limited', 'provider_error', 'invalid_response', 'request_error', 'ok'] as const
 const VALID_SORTS = {
   date_desc: 'e.expense_date DESC, e.id DESC',
   date_asc: 'e.expense_date ASC, e.id ASC',
@@ -19,6 +21,13 @@ function clampInt(value: string | null, fallback: number, min: number, max: numb
   if (rounded < min) return min
   if (rounded > max) return max
   return rounded
+}
+
+function clampConfidence(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return null
+  return Math.max(0, Math.min(1, parsed))
 }
 
 function toCents(value: unknown): number | null {
@@ -96,7 +105,9 @@ export async function GET(request: NextRequest) {
     const { rows } = await pool.query(
       `SELECT e.id, e.title, e.category, e.vendor_name, e.amount_cents,
               e.expense_date, e.notes, e.receipt_number, e.receipt_total_cents,
-              e.receipt_ocr_text, e.ocr_status, e.created_at, e.obra_id,
+              e.receipt_ocr_text, e.ocr_status, e.receipt_classification_source,
+              e.receipt_classification_reason, e.receipt_classification_confidence,
+              e.created_at, e.obra_id,
               e.receipt_image_url, e.receipt_image_public_id, e.receipt_image_format,
               e.receipt_image_bytes, e.receipt_image_width, e.receipt_image_height,
               e.receipt_uploaded_at,
@@ -186,6 +197,13 @@ export async function POST(request: NextRequest) {
     const receiptImageHeight = typeof body.receiptImageHeight === 'number' && Number.isFinite(body.receiptImageHeight)
       ? Math.round(body.receiptImageHeight)
       : null
+    const receiptClassificationSource = typeof body.receiptClassificationSource === 'string' && VALID_CLASSIFICATION_SOURCES.includes(body.receiptClassificationSource)
+      ? body.receiptClassificationSource
+      : null
+    const receiptClassificationReason = typeof body.receiptClassificationReason === 'string' && VALID_CLASSIFICATION_REASONS.includes(body.receiptClassificationReason as typeof VALID_CLASSIFICATION_REASONS[number])
+      ? body.receiptClassificationReason
+      : null
+    const receiptClassificationConfidence = clampConfidence(body.receiptClassificationConfidence)
     const ocrStatus = receiptOcrText ? 'ready_for_review' : 'pending'
 
     if (title.length < 3) {
@@ -213,13 +231,16 @@ export async function POST(request: NextRequest) {
            client_id, obra_id, created_by_user_id, title, category,
            vendor_name, amount_cents, expense_date, notes,
            receipt_number, receipt_total_cents, receipt_ocr_text, ocr_status,
+           receipt_classification_source, receipt_classification_reason, receipt_classification_confidence,
            receipt_image_url, receipt_image_public_id, receipt_image_format,
            receipt_image_bytes, receipt_image_width, receipt_image_height, receipt_uploaded_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::date, CURRENT_DATE), $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::date, CURRENT_DATE), $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
          RETURNING id, title, category, vendor_name, amount_cents,
                    expense_date, notes, receipt_number, receipt_total_cents,
-                   receipt_ocr_text, ocr_status, created_at, obra_id,
+                   receipt_ocr_text, ocr_status, receipt_classification_source,
+                   receipt_classification_reason, receipt_classification_confidence,
+                   created_at, obra_id,
                    receipt_image_url, receipt_image_public_id, receipt_image_format,
                    receipt_image_bytes, receipt_image_width, receipt_image_height,
                    receipt_uploaded_at`,
@@ -237,6 +258,9 @@ export async function POST(request: NextRequest) {
           receiptTotalCents,
           receiptOcrText,
           ocrStatus,
+          receiptClassificationSource,
+          receiptClassificationReason,
+          receiptClassificationConfidence,
           receiptImageUrl,
           receiptImagePublicId,
           receiptImageFormat,

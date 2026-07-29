@@ -20,7 +20,18 @@ export async function POST(request: Request) {
 
     const result = await classifyExpenseOcrText(ocrText)
 
-    return NextResponse.json(result)
+    if (result.source === 'heuristic') {
+      const reason = result.diagnostics?.reason ?? 'request_error'
+      const status = result.diagnostics?.statusCode ? ` status=${result.diagnostics.statusCode}` : ''
+      console.warn(`[expenses.classify] fallback=heuristic reason=${reason}${status} client=${auth.sub}`)
+    } else {
+      console.info(`[expenses.classify] source=ai client=${auth.sub}`)
+    }
+
+    return NextResponse.json({
+      ...result,
+      fallbackReason: result.source === 'heuristic' ? result.diagnostics?.reason ?? 'request_error' : null,
+    })
   } catch {
     return NextResponse.json({ error: 'Falha ao classificar o comprovante' }, { status: 500 })
   }

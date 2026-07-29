@@ -20,6 +20,9 @@ interface Expense {
   receipt_total_cents: number | null
   receipt_ocr_text: string | null
   ocr_status: string
+  receipt_classification_source: 'ai' | 'heuristic' | null
+  receipt_classification_reason: string | null
+  receipt_classification_confidence: number | null
   created_at: string
   obra_id: number | null
   obra_name: string | null
@@ -85,6 +88,20 @@ interface OcrClassificationSuggestion {
   warnings: string[]
 }
 
+interface OcrClassificationResult {
+  source?: 'ai' | 'heuristic'
+  suggestion?: OcrClassificationSuggestion
+  fallbackReason?: string | null
+  diagnostics?: {
+    reason?: string
+    statusCode?: number
+  }
+  error?: string
+  receipt_classification_source?: 'ai' | 'heuristic'
+  receipt_classification_reason?: string | null
+  receipt_classification_confidence?: number | null
+}
+
 type ExpenseSortOption = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc' | 'title_asc'
 type AuditSortOption = 'recent_desc' | 'recent_asc' | 'action_asc' | 'user_asc'
 
@@ -109,6 +126,19 @@ const CATEGORY_OPTIONS = [
   { value: 'outros', label: 'Outros' },
 ]
 
+const CLASSIFICATION_REASON_LABELS: Record<string, string> = {
+  disabled: 'Classificação por IA desabilitada',
+  missing_api_key: 'Chave de IA não configurada',
+  timeout: 'Tempo de resposta excedido',
+  invalid_api_key: 'Chave de IA inválida',
+  insufficient_quota: 'Sem saldo ou quota insuficiente',
+  rate_limited: 'Limite de requisições excedido',
+  provider_error: 'Erro no provedor de IA',
+  invalid_response: 'Resposta inválida do provedor',
+  request_error: 'Erro de requisição para IA',
+  ok: 'Classificação com IA concluída',
+}
+
 function formatMoney(cents: number | null | undefined) {
   const value = (cents ?? 0) / 100
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
@@ -116,6 +146,17 @@ function formatMoney(cents: number | null | undefined) {
 
 function getCategoryLabel(value: string) {
   return CATEGORY_OPTIONS.find((option) => option.value === value)?.label ?? value
+}
+
+function getClassificationSourceLabel(source: Expense['receipt_classification_source']) {
+  if (source === 'ai') return 'IA'
+  if (source === 'heuristic') return 'Heurística'
+  return null
+}
+
+function getClassificationReasonLabel(reason: Expense['receipt_classification_reason']) {
+  if (!reason) return null
+  return CLASSIFICATION_REASON_LABELS[reason] ?? reason
 }
 
 function escapeCsv(value: string | number | null | undefined) {
@@ -324,6 +365,8 @@ export default function ExpensesPage() {
   const [classificationMessage, setClassificationMessage] = useState<string | null>(null)
   const [classifyingReceipt, setClassifyingReceipt] = useState(false)
   const [classificationSource, setClassificationSource] = useState<'ai' | 'heuristic' | null>(null)
+  const [classificationReason, setClassificationReason] = useState<string | null>(null)
+  const [classificationConfidence, setClassificationConfidence] = useState<number | null>(null)
   const [classificationSuggestion, setClassificationSuggestion] = useState<OcrClassificationSuggestion | null>(null)
   const [receiptImage, setReceiptImage] = useState<File | null>(null)
   const [receiptImagePreview, setReceiptImagePreview] = useState<string | null>(null)
@@ -798,6 +841,8 @@ export default function ExpensesPage() {
     setClassificationMessage(null)
     setClassifyingReceipt(false)
     setClassificationSource(null)
+    setClassificationReason(null)
+    setClassificationConfidence(null)
     setClassificationSuggestion(null)
     setOcrProgress(0)
     setError(null)
@@ -830,8 +875,21 @@ export default function ExpensesPage() {
     setOcrMessage(null)
     setClassificationMessage(null)
     setClassifyingReceipt(false)
-    setClassificationSource(null)
-    setClassificationSuggestion(null)
+    setClassificationSource(expense.receipt_classification_source)
+    setClassificationReason(expense.receipt_classification_reason)
+    setClassificationConfidence(expense.receipt_classification_confidence)
+    setClassificationSuggestion(expense.receipt_classification_source
+      ? {
+          category: expense.category,
+          vendorName: expense.vendor_name,
+          amountCents: expense.receipt_total_cents,
+          receiptNumber: expense.receipt_number,
+          expenseDate: expense.expense_date,
+          title: expense.title,
+          confidence: expense.receipt_classification_confidence ?? 0,
+          warnings: [],
+        }
+      : null)
     setOcrProgress(0)
     setError(null)
   }
@@ -843,6 +901,8 @@ export default function ExpensesPage() {
     setClassificationMessage(null)
     setClassifyingReceipt(false)
     setClassificationSource(null)
+    setClassificationReason(null)
+    setClassificationConfidence(null)
     setClassificationSuggestion(null)
     setOcrSuggestedTotalCents(null)
     setUploadedReceipt(null)
@@ -884,11 +944,7 @@ export default function ExpensesPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ocrText }),
       })
-      const data = await response.json().catch(() => null) as {
-        source?: 'ai' | 'heuristic'
-        suggestion?: OcrClassificationSuggestion
-        error?: string
-      } | null
+      const data = await response.json().catch(() => null) as OcrClassificationResult | null
 
       if (!response.ok || !data?.suggestion) {
         setClassificationMessage(data?.error ?? 'Classificação indisponível no momento.')
@@ -896,14 +952,20 @@ export default function ExpensesPage() {
       }
 
       setClassificationSource(data.source ?? 'heuristic')
+      setClassificationReason(data.fallbackReason ?? data.diagnostics?.reason ?? null)
+      setClassificationConfidence(data.suggestion.confidence ?? null)
       setClassificationSuggestion(data.suggestion)
       applyClassificationSuggestion(data.suggestion)
 
       const confidencePercent = Math.round((data.suggestion.confidence ?? 0) * 100)
+      const fallbackReason = data.fallbackReason
+      const fallbackHint = fallbackReason
+        ? ` (motivo: ${fallbackReason})`
+        : ''
       setClassificationMessage(
         data.source === 'ai'
           ? `Classificação por IA aplicada (${confidencePercent}% de confiança).`
-          : `Classificação heurística aplicada (${confidencePercent}% de confiança).`
+          : `Classificação heurística aplicada (${confidencePercent}% de confiança)${fallbackHint}.`
       )
     } catch {
       setClassificationMessage('Falha ao classificar o texto OCR.')
@@ -1038,6 +1100,9 @@ export default function ExpensesPage() {
       receiptImageHeight: receiptMeta?.height ?? null,
       notes: form.notes,
       receiptOcrText: form.receiptOcrText,
+      receiptClassificationSource: classificationSource,
+      receiptClassificationReason: classificationReason,
+      receiptClassificationConfidence: classificationConfidence ?? classificationSuggestion?.confidence ?? null,
     }
 
     const isEditing = editingExpenseId !== null
@@ -1664,6 +1729,20 @@ export default function ExpensesPage() {
                             {expense.ocr_status}
                           </span>
                         )}
+                        {expense.receipt_classification_source && (
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[11px] uppercase tracking-wider ${
+                              expense.receipt_classification_source === 'ai'
+                                ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+                                : 'border-indigo-400/30 bg-indigo-500/10 text-indigo-200'
+                            }`}
+                          >
+                            {getClassificationSourceLabel(expense.receipt_classification_source)}
+                            {typeof expense.receipt_classification_confidence === 'number'
+                              ? ` ${Math.round(expense.receipt_classification_confidence * 100)}%`
+                              : ''}
+                          </span>
+                        )}
                       </div>
                       <p className="mt-1 text-sm text-slate-400">
                         {expense.vendor_name || 'Fornecedor não informado'}
@@ -1674,6 +1753,11 @@ export default function ExpensesPage() {
                         {expense.receipt_number ? ` · Documento: ${expense.receipt_number}` : ''}
                         {expense.receipt_uploaded_at ? ` · Imagem salva` : ''}
                       </p>
+                      {expense.receipt_classification_reason && (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Diagnóstico OCR: {getClassificationReasonLabel(expense.receipt_classification_reason)}
+                        </p>
+                      )}
                       {expense.receipt_image_bytes && (
                         <p className="mt-1 text-xs text-slate-500">
                           Arquivo: {(expense.receipt_image_bytes / 1024).toFixed(0)} KB

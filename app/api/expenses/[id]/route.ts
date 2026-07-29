@@ -5,6 +5,8 @@ import { logExpenseAudit } from '@/lib/expenseAudit'
 import { deleteReceiptImage } from '@/lib/cloudinary'
 
 const VALID_CATEGORIES = ['material', 'alimentacao', 'transporte', 'equipamento', 'servico', 'outros']
+const VALID_CLASSIFICATION_SOURCES = ['ai', 'heuristic'] as const
+const VALID_CLASSIFICATION_REASONS = ['disabled', 'missing_api_key', 'timeout', 'invalid_api_key', 'insufficient_quota', 'rate_limited', 'provider_error', 'invalid_response', 'request_error', 'ok'] as const
 
 function toCents(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value * 100)
@@ -13,6 +15,13 @@ function toCents(value: unknown): number | null {
   const parsed = Number(normalized)
   if (!Number.isFinite(parsed)) return null
   return Math.round(parsed * 100)
+}
+
+function clampConfidence(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return null
+  return Math.max(0, Math.min(1, parsed))
 }
 
 export async function PATCH(
@@ -57,6 +66,13 @@ export async function PATCH(
     const receiptImageHeight = typeof body.receiptImageHeight === 'number' && Number.isFinite(body.receiptImageHeight)
       ? Math.round(body.receiptImageHeight)
       : null
+    const receiptClassificationSource = typeof body.receiptClassificationSource === 'string' && VALID_CLASSIFICATION_SOURCES.includes(body.receiptClassificationSource)
+      ? body.receiptClassificationSource
+      : null
+    const receiptClassificationReason = typeof body.receiptClassificationReason === 'string' && VALID_CLASSIFICATION_REASONS.includes(body.receiptClassificationReason as typeof VALID_CLASSIFICATION_REASONS[number])
+      ? body.receiptClassificationReason
+      : null
+    const receiptClassificationConfidence = clampConfidence(body.receiptClassificationConfidence)
     const ocrStatus = receiptOcrText ? 'ready_for_review' : 'pending'
 
     if (title.length < 3) {
@@ -103,17 +119,22 @@ export async function PATCH(
              receipt_total_cents = $9,
              receipt_ocr_text = $10,
              ocr_status = $11,
-             receipt_image_url = $12,
-             receipt_image_public_id = $13,
-             receipt_image_format = $14,
-             receipt_image_bytes = $15,
-             receipt_image_width = $16,
-             receipt_image_height = $17,
-             receipt_uploaded_at = CASE WHEN $12 IS NOT NULL THEN COALESCE(receipt_uploaded_at, NOW()) ELSE NULL END
-         WHERE id = $18 AND client_id = $19
+             receipt_classification_source = $12,
+             receipt_classification_reason = $13,
+             receipt_classification_confidence = $14,
+             receipt_image_url = $15,
+             receipt_image_public_id = $16,
+             receipt_image_format = $17,
+             receipt_image_bytes = $18,
+             receipt_image_width = $19,
+             receipt_image_height = $20,
+             receipt_uploaded_at = CASE WHEN $15 IS NOT NULL THEN COALESCE(receipt_uploaded_at, NOW()) ELSE NULL END
+           WHERE id = $21 AND client_id = $22
          RETURNING id, title, category, vendor_name, amount_cents,
                    expense_date, notes, receipt_number, receipt_total_cents,
-                   receipt_ocr_text, ocr_status, created_at, obra_id,
+                 receipt_ocr_text, ocr_status, receipt_classification_source,
+                 receipt_classification_reason, receipt_classification_confidence,
+                 created_at, obra_id,
                    receipt_image_url, receipt_image_public_id, receipt_image_format,
                    receipt_image_bytes, receipt_image_width, receipt_image_height,
                    receipt_uploaded_at`,
@@ -129,6 +150,9 @@ export async function PATCH(
           receiptTotalCents,
           receiptOcrText,
           ocrStatus,
+          receiptClassificationSource,
+          receiptClassificationReason,
+          receiptClassificationConfidence,
           receiptImageUrl,
           receiptImagePublicId,
           receiptImageFormat,

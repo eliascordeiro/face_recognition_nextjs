@@ -13,6 +13,24 @@ export interface ExpenseClassificationSuggestion {
   warnings: string[]
 }
 
+export interface ExpenseAiDiagnostics {
+  attempted: boolean
+  usedAi: boolean
+  reason:
+    | 'disabled'
+    | 'missing_api_key'
+    | 'timeout'
+    | 'invalid_api_key'
+    | 'insufficient_quota'
+    | 'rate_limited'
+    | 'provider_error'
+    | 'invalid_response'
+    | 'request_error'
+    | 'ok'
+  statusCode?: number
+  detail?: string
+}
+
 function normalizeText(text: string) {
   return text.replace(/\r/g, '').trim()
 }
@@ -156,7 +174,27 @@ async function classifyWithAi(ocrText: string, baseline: ExpenseClassificationSu
   const enabled = (process.env.EXPENSES_AI_ENABLED ?? 'true').toLowerCase() !== 'false'
   const timeoutMs = Number(process.env.EXPENSES_AI_TIMEOUT_MS ?? '12000')
 
-  if (!enabled || !apiKey) return null
+  if (!enabled) {
+    return {
+      suggestion: null,
+      diagnostics: {
+        attempted: false,
+        usedAi: false,
+        reason: 'disabled',
+      } as ExpenseAiDiagnostics,
+    }
+  }
+
+  if (!apiKey) {
+    return {
+      suggestion: null,
+      diagnostics: {
+        attempted: false,
+        usedAi: false,
+        reason: 'missing_api_key',
+      } as ExpenseAiDiagnostics,
+    }
+  }
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 12000)
@@ -191,14 +229,46 @@ async function classifyWithAi(ocrText: string, baseline: ExpenseClassificationSu
       }),
     })
 
-    if (!response.ok) return null
+    if (!response.ok) {
+      const raw = await response.text().catch(() => '')
+      const normalized = raw.toLowerCase()
+      let reason: ExpenseAiDiagnostics['reason'] = 'provider_error'
+
+      if (response.status === 401 || response.status === 403 || /invalid[_\s-]?api[_\s-]?key|incorrect api key/.test(normalized)) {
+        reason = 'invalid_api_key'
+      } else if (response.status === 429 && /insufficient_quota|quota|billing|credit/.test(normalized)) {
+        reason = 'insufficient_quota'
+      } else if (response.status === 429) {
+        reason = 'rate_limited'
+      }
+
+      return {
+        suggestion: null,
+        diagnostics: {
+          attempted: true,
+          usedAi: false,
+          reason,
+          statusCode: response.status,
+          detail: raw.slice(0, 240),
+        } as ExpenseAiDiagnostics,
+      }
+    }
 
     const payload = await response.json().catch(() => null) as
       | { choices?: Array<{ message?: { content?: string } }> }
       | null
 
     const content = payload?.choices?.[0]?.message?.content
-    if (!content) return null
+    if (!content) {
+      return {
+        suggestion: null,
+        diagnostics: {
+          attempted: true,
+          usedAi: false,
+          reason: 'invalid_response',
+        } as ExpenseAiDiagnostics,
+      }
+    }
 
     const parsed = JSON.parse(content) as Record<string, unknown>
 
@@ -213,9 +283,25 @@ async function classifyWithAi(ocrText: string, baseline: ExpenseClassificationSu
       warnings: [...new Set([...baseline.warnings, ...toSafeWarnings(parsed.warnings)])],
     }
 
-    return merged
-  } catch {
-    return null
+    return {
+      suggestion: merged,
+      diagnostics: {
+        attempted: true,
+        usedAi: true,
+        reason: 'ok',
+      } as ExpenseAiDiagnostics,
+    }
+  } catch (error) {
+    const isTimeout = error instanceof Error && error.name === 'AbortError'
+    return {
+      suggestion: null,
+      diagnostics: {
+        attempted: true,
+        usedAi: false,
+        reason: isTimeout ? 'timeout' : 'request_error',
+        detail: error instanceof Error ? error.message.slice(0, 240) : undefined,
+      } as ExpenseAiDiagnostics,
+    }
   } finally {
     clearTimeout(timer)
   }
@@ -223,17 +309,20 @@ async function classifyWithAi(ocrText: string, baseline: ExpenseClassificationSu
 
 export async function classifyExpenseOcrText(ocrText: string) {
   const heuristic = buildHeuristicSuggestion(ocrText)
-  const aiSuggestion = await classifyWithAi(ocrText, heuristic)
+  const aiResult = await classifyWithAi(ocrText, heuristic)
+  const aiSuggestion = aiResult.suggestion
 
   if (!aiSuggestion) {
     return {
       source: 'heuristic' as const,
       suggestion: heuristic,
+      diagnostics: aiResult.diagnostics,
     }
   }
 
   return {
     source: 'ai' as const,
     suggestion: aiSuggestion,
+    diagnostics: aiResult.diagnostics,
   }
 }
