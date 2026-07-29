@@ -105,20 +105,60 @@ export default function ClientRequestsPage() {
   const [noteByRequest, setNoteByRequest] = useState<Record<number, string>>({})
   const [liveConnected, setLiveConnected] = useState(false)
   const [lastSync, setLastSync] = useState<string | null>(null)
+  const [liveNotice, setLiveNotice] = useState<string | null>(null)
+  const [highlightedRequestId, setHighlightedRequestId] = useState<number | null>(null)
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true
+    if (!silent) {
+      setLoading(true)
+      setError(null)
+    }
+
     const res = await fetch(`/api/client/employee-requests?status=${statusFilter}`)
     const data = await res.json().catch(() => null) as ApiPayload | { error?: string } | null
     if (!res.ok || !data || !('requests' in data)) {
-      setLoading(false)
+      if (!silent) setLoading(false)
       setError((data && 'error' in data && typeof data.error === 'string') ? data.error : 'Falha ao carregar solicitações')
       return
     }
-    setPayload(data)
+
+    let changedNotice: string | null = null
+    let changedRequestId: number | null = null
+
+    setPayload((previous) => {
+      const previousById = new Map(previous.requests.map((item) => [item.id, item]))
+      for (const current of data.requests) {
+        const old = previousById.get(current.id)
+        if (!old) {
+          changedNotice = `Nova solicitação recebida: ${current.title}`
+          changedRequestId = current.id
+          break
+        }
+        if (old.status !== current.status) {
+          changedNotice = `${current.title} foi marcada como ${statusLabel(current.status).toLowerCase()}`
+          changedRequestId = current.id
+          break
+        }
+      }
+
+      if (!changedNotice && previous.unreadCount !== data.unreadCount && data.unreadCount > previous.unreadCount) {
+        changedNotice = 'Nova notificação recebida'
+      }
+
+      return data
+    })
+
+    if (changedNotice) {
+      setLiveNotice(changedNotice)
+      setHighlightedRequestId(changedRequestId)
+      setTimeout(() => {
+        setLiveNotice((current) => (current === changedNotice ? null : current))
+      }, 8000)
+    }
+
     setLastSync(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
-    setLoading(false)
+    if (!silent) setLoading(false)
   }, [statusFilter])
 
   useEffect(() => {
@@ -145,7 +185,7 @@ export default function ClientRequestsPage() {
         setLiveConnected(true)
       })
       eventSource.addEventListener('requests-updated', () => {
-        void loadData()
+        void loadData({ silent: true })
       })
       eventSource.onerror = () => {
         setLiveConnected(false)
@@ -246,6 +286,12 @@ export default function ClientRequestsPage() {
 
       {error && <div className="rounded-xl border border-rose-800 bg-rose-950/30 text-rose-200 p-3 text-sm">{error}</div>}
 
+      {liveNotice && (
+        <div className="rounded-xl border border-sky-700 bg-sky-950/40 text-sky-100 p-3 text-sm">
+          {liveNotice}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="xl:col-span-2 space-y-3">
           {loading ? (
@@ -253,7 +299,10 @@ export default function ClientRequestsPage() {
           ) : payload.requests.length === 0 ? (
             <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 text-sm text-slate-400">Nenhuma solicitação encontrada.</div>
           ) : payload.requests.map((item) => (
-            <div key={item.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
+            <div
+              key={item.id}
+              className={`bg-slate-800 border rounded-xl p-4 space-y-3 transition ${highlightedRequestId === item.id ? 'border-sky-500 shadow-[0_0_0_1px_rgba(56,189,248,0.45)]' : 'border-slate-700'}`}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-slate-100 font-semibold">{item.title}</p>
